@@ -55,44 +55,12 @@ func NewMonitor(concourse concourse.Client, n Notifier, opts ...Option) *JobMoni
 	log := lager.NewLogger("flyontime")
 	log.RegisterSink(lager.NewWriterSink(os.Stdout, lager.DEBUG))
 
-	dashboardLink := func(buildURL string) string {
-		return fmt.Sprintf("%s%s", concourse.URL(), buildURL)
-	}
 	m := &JobMonitor{
 		concourse:    concourse,
 		log:          log,
 		pollInterval: 4 * time.Second,
 		history:      make(map[jobKey]*jobHistory),
-		notifiers: map[jobStatus]func(atc.Build, *jobHistory) error{
-			{statusSucceeded, statusFailed}: func(b atc.Build, h *jobHistory) error {
-				output, _ := buildOutput(concourse, b)
-				return n.Notify(&Notification{
-					Severity:      SeverityError,
-					Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
-					DashboardLink: dashboardLink(b.URL),
-					JobOutput:     output,
-				})
-			},
-			{statusFailed, statusFailed}: func(b atc.Build, h *jobHistory) error {
-				output, err := buildOutput(concourse, b)
-				if err != nil {
-					output = ""
-				}
-				return n.Notify(&Notification{
-					Severity:      SeverityError,
-					Title:         fmt.Sprintf("Job %s from %s is still failing (%d times in a row).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
-					DashboardLink: dashboardLink(b.URL),
-					JobOutput:     output,
-				})
-			},
-			{statusFailed, statusSucceeded}: func(b atc.Build, h *jobHistory) error {
-				return n.Notify(&Notification{
-					Severity:      SeverityInfo,
-					Title:         fmt.Sprintf("Job %s from %s has recovered after %d failure(s).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
-					DashboardLink: dashboardLink(b.URL),
-				})
-			},
-		},
+		notifiers:    defaultNotifiers(n, concourse),
 	}
 
 	for _, op := range opts {
@@ -257,6 +225,8 @@ func buildOutput(c concourse.Client, b atc.Build) (string, error) {
 const (
 	statusFailed    = string(atc.StatusFailed)
 	statusSucceeded = string(atc.StatusSucceeded)
+	statusErrored   = string(atc.StatusErrored)
+	statusAborted   = string(atc.StatusAborted)
 )
 
 type jobHistory struct {
@@ -273,4 +243,54 @@ type jobKey struct {
 type jobStatus struct {
 	Old string
 	New string
+}
+
+func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func(atc.Build, *jobHistory) error {
+	dashboardLink := func(buildURL string) string {
+		return fmt.Sprintf("%s%s", concourse.URL(), buildURL)
+	}
+
+	// errored is used for all states that transition into errored build.
+	errored := func(b atc.Build, h *jobHistory) error {
+		return n.Notify(&Notification{
+			Severity:      SeverityError,
+			Title:         fmt.Sprintf("Job %s from %s has errored.", b.JobName, b.PipelineName),
+			DashboardLink: dashboardLink(b.URL),
+		})
+	}
+
+	return map[jobStatus]func(atc.Build, *jobHistory) error{
+		{statusSucceeded, statusFailed}: func(b atc.Build, h *jobHistory) error {
+			output, _ := buildOutput(concourse, b)
+			return n.Notify(&Notification{
+				Severity:      SeverityError,
+				Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
+				DashboardLink: dashboardLink(b.URL),
+				JobOutput:     output,
+			})
+		},
+		{statusFailed, statusFailed}: func(b atc.Build, h *jobHistory) error {
+			output, err := buildOutput(concourse, b)
+			if err != nil {
+				output = ""
+			}
+			return n.Notify(&Notification{
+				Severity:      SeverityError,
+				Title:         fmt.Sprintf("Job %s from %s is still failing (%d times in a row).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
+				DashboardLink: dashboardLink(b.URL),
+				JobOutput:     output,
+			})
+		},
+		{statusFailed, statusSucceeded}: func(b atc.Build, h *jobHistory) error {
+			return n.Notify(&Notification{
+				Severity:      SeverityInfo,
+				Title:         fmt.Sprintf("Job %s from %s has recovered after %d failure(s).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
+				DashboardLink: dashboardLink(b.URL),
+			})
+		},
+		{"", statusErrored}:              errored,
+		{statusSucceeded, statusErrored}: errored,
+		{statusFailed, statusErrored}:    errored,
+		{statusErrored, statusErrored}:   errored,
+	}
 }
