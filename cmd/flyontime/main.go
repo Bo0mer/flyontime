@@ -1,3 +1,5 @@
+// Command flyontime monitors Concourse jobs and sends notifications on
+// significant events.
 package main
 
 import (
