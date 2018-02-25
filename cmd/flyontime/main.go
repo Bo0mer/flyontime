@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
+	"github.com/Bo0mer/flyontime/pkg/mattermost"
 	"github.com/Bo0mer/flyontime/pkg/slacker"
 	"github.com/concourse/go-concourse/concourse"
 	"github.com/namsral/flag"
@@ -21,8 +22,12 @@ import (
 )
 
 var (
-	channelID         string
-	slackToken        string
+	slackChannelID string
+	slackToken     string
+
+	mattermostChannelID string
+	mattermostToken     string
+
 	concourseURL      string
 	concourseUsername string
 	concoursePassword string
@@ -30,8 +35,12 @@ var (
 )
 
 func init() {
-	flag.StringVar(&channelID, "slack-channel-id", "", "Slack channel id for sending alerts")
+	flag.StringVar(&slackChannelID, "slack-channel-id", "", "Slack channel id for sending alerts")
 	flag.StringVar(&slackToken, "slack-token", "", "Slack token for sending alerts")
+
+	flag.StringVar(&mattermostChannelID, "mattermost-channel-id", "", "Mattermost channel id for sending alerts")
+	flag.StringVar(&mattermostToken, "mattermost-token", "", "Mattermost token for sending alerts")
+
 	flag.StringVar(&concourseURL, "concourse-url", "http://localhost:8080", "Concourse URL")
 	flag.StringVar(&concourseUsername, "concourse-username", "", "Concourse Username")
 	flag.StringVar(&concoursePassword, "concourse-password", "", "Concourse Password")
@@ -41,17 +50,12 @@ func init() {
 func main() {
 	flag.Parse()
 
-	slacker := &slacker.Slacker{
-		Token:     slackToken,
-		ChannelID: channelID,
-	}
-
 	c, err := newConcourseClient(concourseURL, concourseTeam, concourseUsername, concoursePassword)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[0], err)
 		os.Exit(1)
 	}
-	mon := flyontime.NewMonitor(c, slacker)
+	mon := flyontime.NewMonitor(c, notifierFromFlags())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -64,6 +68,22 @@ func main() {
 	cancel()
 
 	fmt.Printf("Bye\n")
+}
+
+func notifierFromFlags() (n flyontime.Notifier) {
+	if slackToken != "" {
+		n = &slacker.Notifier{
+			Token:     slackToken,
+			ChannelID: slackChannelID,
+		}
+	}
+	if mattermostToken != "" {
+		n = &mattermost.Notifier{
+			Token:     mattermostToken,
+			ChannelID: mattermostChannelID,
+		}
+	}
+	return n
 }
 
 func newConcourseClient(url, team, username, password string) (concourse.Client, error) {
