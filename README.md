@@ -26,6 +26,10 @@ Usage of flyontime:
     	Concourse URL (default "http://localhost:8080")
   -concourse-username string
     	Concourse Username
+  -mattermost-channel-id string
+    	Mattermost channel id for sending alerts
+  -mattermost-token string
+    	Mattermost token for sending alerts
   -slack-channel-id string
     	Slack channel id for sending alerts
   -slack-token string
