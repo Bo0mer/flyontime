@@ -8,7 +8,7 @@ import (
 	"github.com/nlopes/slack"
 )
 
-type Slacker struct {
+type Notifier struct {
 	Token     string
 	ChannelID string
 
@@ -16,13 +16,13 @@ type Slacker struct {
 	slack    *slack.Client
 }
 
-func (s *Slacker) init() {
+func (s *Notifier) init() {
 	s.initOnce.Do(func() {
 		s.slack = slack.New(s.Token)
 	})
 }
 
-func (s *Slacker) Notify(n *flyontime.Notification) error {
+func (s *Notifier) Notify(n *flyontime.Notification) error {
 	s.init()
 	p := slack.PostMessageParameters{
 		Attachments: []slack.Attachment{
@@ -54,5 +54,3 @@ func formatCode(code string) string {
 	}
 	return fmt.Sprintf("```%s```", code)
 }
-
-//var _ flyontime.Messenger = &Slacker{}
