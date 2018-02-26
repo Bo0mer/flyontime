@@ -1,6 +1,10 @@
 package flyontime
 
-import "github.com/concourse/atc"
+import (
+	"context"
+
+	"github.com/concourse/atc"
+)
 
 type Severity string
 
@@ -33,5 +37,5 @@ type Notification struct {
 }
 
 type Notifier interface {
-	Notify(n *Notification) error
+	Notify(ctx context.Context, n *Notification) error
 }

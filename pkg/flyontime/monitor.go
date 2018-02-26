@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 
 	"code.cloudfoundry.org/lager"
+	"code.cloudfoundry.org/lager/lagerctx"
 	"github.com/concourse/atc"
 	"github.com/concourse/atc/event"
 	"github.com/concourse/go-concourse/concourse"
@@ -29,18 +29,17 @@ type Monitor struct {
 	stop     chan struct{}
 
 	history         map[jobKey]*jobHistory
-	notifiers       map[jobStatus]func(atc.Build, *jobHistory) error
+	notifiers       map[jobStatus]notifyFunc
 	manuallyStarted map[int]func(b atc.Build)
 }
 
-func NewMonitor(pilot *Pilot, n Notifier, c Commander) *Monitor {
-	log := lager.NewLogger("flyontime")
-	log.RegisterSink(lager.NewWriterSink(os.Stdout, lager.DEBUG))
+type notifyFunc func(context.Context, atc.Build, *jobHistory) error
 
+func NewMonitor(pilot *Pilot, n Notifier, c Commander, logger lager.Logger) *Monitor {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Monitor{
 		pilot: pilot,
-		log:   log,
+		log:   logger,
 
 		cancel: cancel,
 		builds: pilot.FinishedBuilds(ctx),
@@ -69,16 +68,17 @@ func (m *Monitor) run() {
 	for {
 		select {
 		case b := <-m.builds:
-			m.handleBuild(b)
+			m.handleBuild(m.log.Session("handle-build"), b)
 		case c := <-m.commands:
-			m.handleCommand(c)
+			m.handleCommand(m.log.Session("handle-command"), c)
 		case <-m.stop:
 			return
 		}
 	}
 }
 
-func (m *Monitor) handleCommand(c *Command) {
+func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
+	logger.Info(c.Name, lager.Data{"args": c.Args})
 	switch c.Name {
 	case "rerun", "try again", "retry":
 		m.commandRerun(c)
@@ -128,14 +128,15 @@ func (m *Monitor) commandPlay(c *Command) {
 		c.Responses <- fmt.Sprintf("Unpausing pipeline %s failed: %v", c.Job.Pipeline, err)
 	}
 	if ok {
-		c.Responses <- fmt.Sprintf("Pipeline %s is now unapused.", c.Job.Pipeline)
+		c.Responses <- fmt.Sprintf("Pipeline %s is now unpaused.", c.Job.Pipeline)
 	} else {
 		c.Responses <- fmt.Sprintf("Pipeline %s is already unpaused.", c.Job.Pipeline)
 	}
 }
 
-func (m *Monitor) handleBuild(b atc.Build) {
+func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
 	if b.OneOff() {
+		logger.Info("skip-one-off")
 		// One off, no need to send notifications.
 		return
 	}
@@ -148,6 +149,7 @@ func (m *Monitor) handleBuild(b atc.Build) {
 
 	if respond, ok := m.isManuallyStarted(b); ok {
 		// Respond with the build status if it is manually started.
+		logger.Info("respond-to-manually-started")
 		respond(b)
 		delete(m.manuallyStarted, b.ID)
 		return
@@ -155,7 +157,7 @@ func (m *Monitor) handleBuild(b atc.Build) {
 
 	// Send notification if necessary.
 	if m.shouldNotify(b, h) {
-		m.notify(b, h)
+		m.notify(m.log.Session("notify"), b, h)
 	}
 }
 
@@ -169,14 +171,17 @@ func (m *Monitor) shouldNotify(build atc.Build, h *jobHistory) bool {
 	return ok
 }
 
-func (m *Monitor) notify(build atc.Build, h *jobHistory) {
+func (m *Monitor) notify(logger lager.Logger, build atc.Build, h *jobHistory) {
 	f, ok := m.notifiers[jobStatus{h.LastStatus, build.Status}]
 	if !ok {
 		return
 	}
-	if err := f(build, h); err != nil {
-		m.log.Session("notify").Error("fail", err)
+	ctx := lagerctx.NewContext(context.Background(), logger)
+	if err := f(ctx, build, h); err != nil {
+		logger.Error("fail", err)
+		return
 	}
+	logger.Info("done")
 }
 
 func (m *Monitor) updateHistory(b atc.Build, h *jobHistory) {
@@ -262,14 +267,14 @@ type jobStatus struct {
 	New string
 }
 
-func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func(atc.Build, *jobHistory) error {
+func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]notifyFunc {
 	dashboardLink := func(b atc.Build) string {
 		return fmt.Sprintf("%s/teams/%s/pipelines/%s/jobs/%s/builds/%s", concourse.URL(), b.TeamName, b.PipelineName, b.JobName, b.Name)
 	}
 
 	// errored is used for all states that transition into errored build.
-	errored := func(b atc.Build, h *jobHistory) error {
-		return n.Notify(&Notification{
+	errored := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		return n.Notify(ctx, &Notification{
 			Severity:      SeverityError,
 			Title:         fmt.Sprintf("Job %s from %s has errored.", b.JobName, b.PipelineName),
 			Job:           jobFromATCBuild(b),
@@ -277,10 +282,20 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func
 		})
 	}
 
-	return map[jobStatus]func(atc.Build, *jobHistory) error{
-		{statusSucceeded, statusFailed}: func(b atc.Build, h *jobHistory) error {
+	// errored is used for all states that transition into aborted build.
+	aborted := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		return n.Notify(ctx, &Notification{
+			Severity:      SeverityError,
+			Title:         fmt.Sprintf("Job %s from %s has been aborted.", b.JobName, b.PipelineName),
+			Job:           jobFromATCBuild(b),
+			DashboardLink: dashboardLink(b),
+		})
+	}
+
+	return map[jobStatus]notifyFunc{
+		{statusSucceeded, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
 			output, _ := buildOutput(concourse, b)
-			return n.Notify(&Notification{
+			return n.Notify(ctx, &Notification{
 				Severity:      SeverityError,
 				Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
 				DashboardLink: dashboardLink(b),
@@ -288,12 +303,12 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func
 				JobOutput:     output,
 			})
 		},
-		{statusFailed, statusFailed}: func(b atc.Build, h *jobHistory) error {
+		{statusFailed, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
 			output, err := buildOutput(concourse, b)
 			if err != nil {
 				output = ""
 			}
-			return n.Notify(&Notification{
+			return n.Notify(ctx, &Notification{
 				Severity:      SeverityError,
 				Title:         fmt.Sprintf("Job %s from %s is still failing (%d times in a row).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
 				DashboardLink: dashboardLink(b),
@@ -301,8 +316,8 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func
 				JobOutput:     output,
 			})
 		},
-		{statusFailed, statusSucceeded}: func(b atc.Build, h *jobHistory) error {
-			return n.Notify(&Notification{
+		{statusFailed, statusSucceeded}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
+			return n.Notify(ctx, &Notification{
 				Severity:      SeverityInfo,
 				Title:         fmt.Sprintf("Job %s from %s has recovered after %d failure(s).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
 				Job:           jobFromATCBuild(b),
@@ -313,5 +328,9 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func
 		{statusSucceeded, statusErrored}: errored,
 		{statusFailed, statusErrored}:    errored,
 		{statusErrored, statusErrored}:   errored,
+		{"", statusAborted}:              aborted,
+		{statusSucceeded, statusAborted}: aborted,
+		{statusFailed, statusAborted}:    aborted,
+		{statusErrored, statusAborted}:   aborted,
 	}
 }

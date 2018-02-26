@@ -1,6 +1,7 @@
 package slacker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -95,7 +96,7 @@ func (s *Notifier) handleReply(callbackID, text, threadTimestamp string) {
 	}()
 }
 
-func (s *Notifier) Notify(n *flyontime.Notification) error {
+func (s *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error {
 	s.init()
 	callbackID := uuid.NewV4().String()
 	p := slack.PostMessageParameters{

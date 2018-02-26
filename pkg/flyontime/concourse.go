@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"time"
 
 	"code.cloudfoundry.org/lager"
@@ -27,10 +26,7 @@ type Pilot struct {
 	log          lager.Logger
 }
 
-func NewPilot(concourseURL, team, username, password string) (*Pilot, error) {
-	log := lager.NewLogger("flyontime")
-	log.RegisterSink(lager.NewWriterSink(os.Stdout, lager.DEBUG))
-
+func NewPilot(concourseURL, team, username, password string, logger lager.Logger) (*Pilot, error) {
 	c, err := newConcourseClient(concourseURL, team, username, password)
 	if err != nil {
 		return nil, err
@@ -40,14 +36,14 @@ func NewPilot(concourseURL, team, username, password string) (*Pilot, error) {
 		Client:       c,
 		Team:         c.Team(team),
 		pollInterval: 4 * time.Second,
-		log:          log,
+		log:          logger,
 	}, nil
 }
 
 func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 	c := make(chan atc.Build)
 	go func() {
-		log := p.log
+		logger := p.log.Session("finished-builds")
 		t := time.NewTicker(p.pollInterval)
 		defer func() {
 			t.Stop()
@@ -55,6 +51,7 @@ func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 		}()
 		_, pg, err := p.Builds(concourse.Page{Limit: 1})
 		if err != nil {
+			logger.Session("init").Error("fail", err)
 			return
 		}
 		lastSeen := pg.Next.Since
@@ -62,11 +59,10 @@ func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 		for {
 			select {
 			case <-t.C:
-				log := log.Session("recheck")
-				log.Debug("start")
+				logger := logger.Session("get-latest")
 				builds, pg, err = p.Builds(concourse.Page{Until: lastSeen, Limit: 100})
 				if err != nil {
-					log.Error("fail", err)
+					logger.Error("fail", err)
 					continue
 				}
 				if pg.Next == nil {
@@ -83,12 +79,14 @@ func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 				for _, b := range builds {
 					if b.IsRunning() {
 						// In order to resend the build once it has finished.
+						logger.Debug("skip-running", lager.Data{"build_id": b.ID})
 						lastSeen = min(b.ID, lastSeen) - 1
 						continue
 					}
 					c <- b
 				}
 			case <-ctx.Done():
+				logger.Info("exit")
 				return
 			}
 		}

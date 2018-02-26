@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"code.cloudfoundry.org/lager"
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
 	"github.com/Bo0mer/flyontime/pkg/mattermost"
 	"github.com/Bo0mer/flyontime/pkg/slacker"
@@ -33,6 +34,8 @@ var (
 	concourseUsername string
 	concoursePassword string
 	concourseTeam     string
+
+	verbose bool
 )
 
 func init() {
@@ -47,17 +50,32 @@ func init() {
 	flag.StringVar(&concourseUsername, "concourse-username", "", "Concourse Username")
 	flag.StringVar(&concoursePassword, "concourse-password", "", "Concourse Password")
 	flag.StringVar(&concourseTeam, "concourse-team", "main", "Concourse Team")
+
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 }
 
 func main() {
 	flag.Parse()
 
-	pilot, err := flyontime.NewPilot(concourseURL, concourseTeam, concourseUsername, concoursePassword)
+	logger := lager.NewLogger("flyontime")
+	lvl := lager.INFO
+	if verbose {
+		lvl = lager.DEBUG
+	}
+	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lvl))
+
+	pilot, err := flyontime.NewPilot(
+		concourseURL,
+		concourseTeam,
+		concourseUsername,
+		concoursePassword,
+		logger.Session("pilot"),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
-	nc := chatFromFlags()
-	m := flyontime.NewMonitor(pilot, nc, nc)
+	nc := chatFromFlags(logger.Session("messenger"))
+	m := flyontime.NewMonitor(pilot, nc, nc, logger.Session("monitor"))
 	go m.Start()
 
 	sigChan := make(chan os.Signal, 1)
@@ -73,7 +91,7 @@ type chat interface {
 	flyontime.Commander
 }
 
-func chatFromFlags() (n chat) {
+func chatFromFlags(logger lager.Logger) (n chat) {
 	if slackToken != "" {
 		n = &slacker.Notifier{
 			Token:     slackToken,
@@ -85,6 +103,7 @@ func chatFromFlags() (n chat) {
 			API:       mattermostURL,
 			Token:     mattermostToken,
 			ChannelID: mattermostChannelID,
+			Logger:    logger,
 		}
 	}
 	return n

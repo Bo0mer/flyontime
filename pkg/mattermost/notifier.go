@@ -1,6 +1,7 @@
 package mattermost
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"code.cloudfoundry.org/lager"
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/pkg/errors"
@@ -19,6 +21,7 @@ type Notifier struct {
 	ChannelID   string // provide either ChannelId or TeamName and ChannelName
 	TeamName    string
 	ChannelName string
+	Logger      lager.Logger
 
 	initOnce sync.Once
 	client   *model.Client4
@@ -73,9 +76,10 @@ func (mm *Notifier) init() error {
 func (mm *Notifier) Commands() <-chan *flyontime.Command {
 	mm.init()
 
+	logger := mm.Logger.Session("commands")
 	api, err := url.Parse(mm.API)
 	if err != nil {
-		// TODO(borshukov): Handle error.
+		logger.Error("parse-api-url.fail", err)
 		return nil
 	}
 	if api.Scheme == "https" {
@@ -87,23 +91,24 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 	go func() {
 		ws, err := model.NewWebSocketClient4(api.String(), mm.Token)
 		if err != nil {
-			// TODO(borshukov): Handle error.
+			logger.Error("websocket-connect.fail", err)
 			return
 		}
 		ws.Listen()
 
 		for ev := range ws.EventChannel {
 			if ev.EventType() != "posted" {
+				logger.Debug("skip-message")
 				continue
 			}
 			postJSON, ok := ev.Data["post"].(string)
 			if !ok {
-				// TODO(borshukov): Handle error.
+				logger.Error("get-post-data.fail", err)
 				continue
 			}
 			p := new(model.Post)
 			if err := json.Unmarshal([]byte(postJSON), p); err != nil {
-				// TODO(borshukov): Handle error.
+				logger.Error("parse-post-data.fail", err)
 				continue
 			}
 			if p.UserId == mm.self.Id {
@@ -111,16 +116,17 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 				continue
 			}
 
-			mm.handleReply(p, p.Message)
+			mm.handleReply(logger.Session("handle-reply"), p, p.Message)
 		}
 	}()
 
 	return mm.commands
 }
 
-func (mm *Notifier) handleReply(reply *model.Post, text string) {
+func (mm *Notifier) handleReply(logger lager.Logger, reply *model.Post, text string) {
 	n, ok := mm.posts[reply.ParentId]
 	if !ok {
+		logger.Debug("skip-foreign-reply")
 		return
 	}
 	cmd, args := parseCommand(text)
@@ -136,18 +142,20 @@ func (mm *Notifier) handleReply(reply *model.Post, text string) {
 		}
 		// And post each response as a message.
 		for r := range responses {
-			// TODO(borshukov): Handle error.
-			mm.client.CreatePost(&model.Post{
+			_, resp := mm.client.CreatePost(&model.Post{
 				Message:   r,
 				ChannelId: mm.ChannelID,
 				ParentId:  reply.Id,
 				RootId:    reply.RootId,
 			})
+			if resp.Error != nil {
+				logger.Error("create-post.fail", resp.Error)
+			}
 		}
 	}()
 }
 
-func (mm *Notifier) Notify(n *flyontime.Notification) error {
+func (mm *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error {
 	if err := mm.init(); err != nil {
 		return err
 	}
