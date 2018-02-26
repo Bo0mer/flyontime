@@ -3,9 +3,9 @@
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +25,7 @@ var (
 	slackChannelID string
 	slackToken     string
 
+	mattermostURL       string
 	mattermostChannelID string
 	mattermostToken     string
 
@@ -38,6 +39,7 @@ func init() {
 	flag.StringVar(&slackChannelID, "slack-channel-id", "", "Slack channel id for sending alerts")
 	flag.StringVar(&slackToken, "slack-token", "", "Slack token for sending alerts")
 
+	flag.StringVar(&mattermostURL, "mattermost-url", "", "Mattermost channel id for sending alerts")
 	flag.StringVar(&mattermostChannelID, "mattermost-channel-id", "", "Mattermost channel id for sending alerts")
 	flag.StringVar(&mattermostToken, "mattermost-token", "", "Mattermost token for sending alerts")
 
@@ -50,27 +52,28 @@ func init() {
 func main() {
 	flag.Parse()
 
-	c, err := newConcourseClient(concourseURL, concourseTeam, concourseUsername, concoursePassword)
+	pilot, err := flyontime.NewPilot(concourseURL, concourseTeam, concourseUsername, concoursePassword)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[0], err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
-	mon := flyontime.NewMonitor(c, notifierFromFlags())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		mon.Monitor(ctx)
-	}()
+	nc := chatFromFlags()
+	m := flyontime.NewMonitor(pilot, nc, nc)
+	go m.Start()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
-	cancel()
+	m.Stop()
 
 	fmt.Printf("Bye\n")
 }
 
-func notifierFromFlags() (n flyontime.Notifier) {
+type chat interface {
+	flyontime.Notifier
+	flyontime.Commander
+}
+
+func chatFromFlags() (n chat) {
 	if slackToken != "" {
 		n = &slacker.Notifier{
 			Token:     slackToken,
@@ -79,6 +82,7 @@ func notifierFromFlags() (n flyontime.Notifier) {
 	}
 	if mattermostToken != "" {
 		n = &mattermost.Notifier{
+			API:       mattermostURL,
 			Token:     mattermostToken,
 			ChannelID: mattermostChannelID,
 		}
@@ -87,7 +91,7 @@ func notifierFromFlags() (n flyontime.Notifier) {
 }
 
 func newConcourseClient(url, team, username, password string) (concourse.Client, error) {
-	c := concourse.NewClient(concourseURL, authenticatedClient(username, password), false)
+	c := concourse.NewClient(url, authenticatedClient(username, password), false)
 
 	t := c.Team(team)
 	token, err := t.AuthToken()
