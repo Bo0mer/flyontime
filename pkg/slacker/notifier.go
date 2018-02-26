@@ -97,7 +97,7 @@ func (s *Notifier) handleReply(callbackID, text, threadTimestamp string) {
 
 func (s *Notifier) Notify(n *flyontime.Notification) error {
 	s.init()
-	callbackID := uuid.Must(uuid.NewV4()).String()
+	callbackID := uuid.NewV4().String()
 	p := slack.PostMessageParameters{
 		Attachments: []slack.Attachment{
 			slack.Attachment{
