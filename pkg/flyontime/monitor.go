@@ -6,6 +6,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagerctx"
@@ -31,6 +33,9 @@ type Monitor struct {
 	history         map[jobKey]*jobHistory
 	notifiers       map[jobStatus]notifyFunc
 	manuallyStarted map[int]func(b atc.Build)
+
+	mu    sync.Mutex
+	muted map[jobKey]time.Time
 }
 
 type notifyFunc func(context.Context, atc.Build, *jobHistory) error
@@ -50,6 +55,7 @@ func NewMonitor(pilot *Pilot, n Notifier, c Commander, logger lager.Logger) *Mon
 		history:         make(map[jobKey]*jobHistory),
 		notifiers:       defaultNotifiers(n, pilot.Client),
 		manuallyStarted: make(map[int]func(atc.Build)),
+		muted:           make(map[jobKey]time.Time),
 	}
 
 	return m
@@ -86,6 +92,8 @@ func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
 		m.commandPause(c)
 	case "unpause", "play":
 		m.commandPlay(c)
+	case "mute", "silence":
+		m.commandMute(c)
 	default:
 		c.Responses <- fmt.Sprintf("Unknown command: %q", c.Name)
 	}
@@ -134,6 +142,26 @@ func (m *Monitor) commandPlay(c *Command) {
 	}
 }
 
+func (m *Monitor) commandMute(c *Command) {
+	defer close(c.Responses)
+
+	if len(c.Args) == 0 {
+		c.Args = []string{"30m"} // default mute duration
+	}
+	d, err := time.ParseDuration(c.Args[0])
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Invalid duration %q", c.Args[0])
+		return
+	}
+
+	j := c.Job
+	until := time.Now().Add(d)
+	m.mu.Lock()
+	m.muted[jobKey{j.Team, j.Pipeline, j.Name}] = until
+	m.mu.Unlock()
+	c.Responses <- fmt.Sprintf("Muted notifications for %s until %s", j.Name, until.Format(time.Kitchen))
+}
+
 func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
 	if b.OneOff() {
 		logger.Info("skip-one-off")
@@ -156,12 +184,10 @@ func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
 	}
 
 	// Send notification if necessary.
-	if m.shouldNotify(b, h) {
+	if m.shouldNotify(logger.Session("should-notify"), b, h) {
 		m.notify(
 			logger.Session("notify", lager.Data{"build": b.ID}),
 			b, h)
-	} else {
-		logger.Debug("skip-notify", lager.Data{"build": b.ID})
 	}
 }
 
@@ -170,8 +196,26 @@ func (m *Monitor) isManuallyStarted(build atc.Build) (respond func(atc.Build), o
 	return
 }
 
-func (m *Monitor) shouldNotify(build atc.Build, h *jobHistory) bool {
-	_, ok := m.notifiers[jobStatus{h.LastStatus, build.Status}]
+func (m *Monitor) shouldNotify(logger lager.Logger, b atc.Build, h *jobHistory) bool {
+	_, ok := m.notifiers[jobStatus{h.LastStatus, b.Status}]
+	if !ok {
+		logger.Debug("no-notifier")
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := jobKey{b.TeamName, b.PipelineName, b.JobName}
+	until, muted := m.muted[key]
+	if !muted {
+		return ok
+	}
+
+	if time.Now().Before(until) {
+		logger.Debug("notifications-muted")
+		return false
+	}
+	delete(m.muted, key)
 	return ok
 }
 
