@@ -14,16 +14,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
-var (
-	pollInterval = 4 * time.Second
-)
-
 type Pilot struct {
 	concourse.Client
 	concourse.Team
-
-	pollInterval time.Duration
-	log          lager.Logger
+	Logger       lager.Logger
+	PollInterval time.Duration
 }
 
 func NewPilot(concourseURL, team, username, password string, logger lager.Logger) (*Pilot, error) {
@@ -35,16 +30,16 @@ func NewPilot(concourseURL, team, username, password string, logger lager.Logger
 	return &Pilot{
 		Client:       c,
 		Team:         c.Team(team),
-		pollInterval: 4 * time.Second,
-		log:          logger,
+		PollInterval: 4 * time.Second,
+		Logger:       logger,
 	}, nil
 }
 
 func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 	c := make(chan atc.Build)
 	go func() {
-		logger := p.log.Session("finished-builds")
-		t := time.NewTicker(p.pollInterval)
+		logger := p.Logger.Session("finished-builds")
+		t := time.NewTicker(p.PollInterval)
 		defer func() {
 			t.Stop()
 			close(c)
@@ -65,7 +60,7 @@ func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 					logger.Error("fail", err)
 					continue
 				}
-				if pg.Next == nil {
+				if len(builds) == 0 || pg.Next == nil {
 					// No new builds.
 					continue
 				}
@@ -148,4 +143,15 @@ type basicAuthTransport struct {
 func (t basicAuthTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.SetBasicAuth(t.username, t.password)
 	return t.base.RoundTrip(r)
+}
+
+//go:generate counterfeiter . concourseClient
+//go:generate counterfeiter . team
+
+type concourseClient interface {
+	concourse.Client
+}
+
+type team interface {
+	concourse.Team
 }
