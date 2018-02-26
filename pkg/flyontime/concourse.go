@@ -79,7 +79,6 @@ func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 				for _, b := range builds {
 					if b.IsRunning() {
 						// In order to resend the build once it has finished.
-						logger.Debug("skip-running", lager.Data{"build_id": b.ID})
 						lastSeen = min(b.ID, lastSeen) - 1
 						continue
 					}

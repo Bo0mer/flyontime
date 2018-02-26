@@ -157,7 +157,11 @@ func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
 
 	// Send notification if necessary.
 	if m.shouldNotify(b, h) {
-		m.notify(m.log.Session("notify"), b, h)
+		m.notify(
+			logger.Session("notify", lager.Data{"build": b.ID}),
+			b, h)
+	} else {
+		logger.Debug("skip-notify", lager.Data{"build": b.ID})
 	}
 }
 
