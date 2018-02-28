@@ -11,6 +11,7 @@ import (
 
 	"code.cloudfoundry.org/lager"
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
+	"github.com/lunixbochs/vtclean"
 	"github.com/mattermost/mattermost-server/model"
 	"github.com/pkg/errors"
 )
@@ -191,7 +192,7 @@ func formatCode(code string) string {
 	if code == "" {
 		return ""
 	}
-	return fmt.Sprintf("```text\n%s\n```", code)
+	return fmt.Sprintf("```text\n%s\n```", vtclean.Clean(code, false))
 }
 func parseCommand(text string) (string, []string) {
 	s := strings.Split(text, " ")

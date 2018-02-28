@@ -86,6 +86,12 @@
   revision = "7cafcd837844e784b526369c9bce262804aebc60"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/lunixbochs/vtclean"
+  packages = ["."]
+  revision = "d14193dfc626125c831501c1c42340b4248e1f5a"
+
+[[projects]]
   name = "github.com/mattermost/mattermost-server"
   packages = ["model","utils/markdown"]
   revision = "659ce8c60012a7d5fd597997b1794ac512b3b155"

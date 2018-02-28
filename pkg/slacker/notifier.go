@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
+	"github.com/lunixbochs/vtclean"
 	"github.com/nlopes/slack"
 	uuid "github.com/satori/go.uuid"
 )
@@ -132,7 +133,7 @@ func formatCode(code string) string {
 	if code == "" {
 		return ""
 	}
-	return fmt.Sprintf("```%s```", code)
+	return fmt.Sprintf("```\n%s\n```", vtclean.Clean(code, false))
 }
 
 type messageKey struct {
