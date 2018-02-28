@@ -3,6 +3,22 @@
 Command flyontime implements interactive Slack/Mattermost bot that monitors
 Concourse CI jobs and sends notifications on significant events.
 
+Notifications are sent for on following job state transitions:
+* job fails
+* job succeeds after failing at least once
+* job errors
+* job is aborted
+
+Additionally, each notification message supports a set of commands for taking
+further actions. To invoke a specific command, just reply to the notification
+message. The following commands are currently supported:
+
+* `rerun`, `retry` - Rerun the job and post its new status.
+* `mute [duration]`, `silence [duration]` - Mute notifications for this
+  particular job for `duration` (e.g. `mute 30m`).
+* `pause`, `stop` - Pause the pipeline which the job is part of.
+* `unapuse`, `play` - Pause the pipeline which the job is part of.
+
 ## Usage
 
 Configuration could be provided both from environment variables and as
