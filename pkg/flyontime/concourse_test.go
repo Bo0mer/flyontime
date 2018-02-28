@@ -20,7 +20,7 @@ var _ = Describe("Pilot", func() {
 		var client *flyontimefakes.FakeConcourseClient
 		var team *flyontimefakes.FakeTeam
 
-		var pilot *Pilot
+		var pilot *AutoPilot
 		var builds <-chan atc.Build
 		var stop context.CancelFunc
 
@@ -36,7 +36,7 @@ var _ = Describe("Pilot", func() {
 		})
 
 		JustBeforeEach(func() {
-			pilot = &Pilot{
+			pilot = &AutoPilot{
 				Client:       client,
 				Team:         team,
 				Logger:       lager.NewLogger("test"),

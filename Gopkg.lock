@@ -3,7 +3,7 @@
 
 [[projects]]
   name = "code.cloudfoundry.org/lager"
-  packages = ["."]
+  packages = [".","lagerctx"]
   revision = "0bfa98e49e7a976af91e918d47978f07c00b081f"
   version = "v1.0.0"
 
@@ -116,6 +116,18 @@
   version = "v0.2.0"
 
 [[projects]]
+  name = "github.com/onsi/ginkgo"
+  packages = [".","config","internal/codelocation","internal/containernode","internal/failer","internal/leafnodes","internal/remote","internal/spec","internal/spec_iterator","internal/specrunner","internal/suite","internal/testingtproxy","internal/writer","reporters","reporters/stenographer","reporters/stenographer/support/go-colorable","reporters/stenographer/support/go-isatty","types"]
+  revision = "9eda700730cba42af70d53180f9dcce9266bc2bc"
+  version = "v1.4.0"
+
+[[projects]]
+  name = "github.com/onsi/gomega"
+  packages = [".","format","internal/assertion","internal/asyncassertion","internal/oraclematcher","internal/testingtsupport","matchers","matchers/support/goraph/bipartitegraph","matchers/support/goraph/edge","matchers/support/goraph/node","matchers/support/goraph/util","types"]
+  revision = "003f63b7f4cff3fc95357005358af2de0f5fe152"
+  version = "v1.3.0"
+
+[[projects]]
   name = "github.com/pborman/uuid"
   packages = ["."]
   revision = "e790cca94e6cc75c7064b1332e63811d4aae1a53"
@@ -166,7 +178,7 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/net"
-  packages = ["context","context/ctxhttp"]
+  packages = ["context","context/ctxhttp","html","html/atom","html/charset"]
   revision = "cbe0f9307d0156177f9dd5dc85da1a31abc5f2fb"
 
 [[projects]]
@@ -174,6 +186,18 @@
   name = "golang.org/x/oauth2"
   packages = [".","internal"]
   revision = "543e37812f10c46c622c9575afd7ad22f22a12ba"
+
+[[projects]]
+  branch = "master"
+  name = "golang.org/x/sys"
+  packages = ["unix"]
+  revision = "f6cff0780e542efa0c8e864dc8fa522808f6a598"
+
+[[projects]]
+  name = "golang.org/x/text"
+  packages = ["encoding","encoding/charmap","encoding/htmlindex","encoding/internal","encoding/internal/identifier","encoding/japanese","encoding/korean","encoding/simplifiedchinese","encoding/traditionalchinese","encoding/unicode","internal/gen","internal/tag","internal/utf8internal","language","runes","transform","unicode/cldr"]
+  revision = "f21a4dfb5e38f5895301dc265a8def02365cc3d0"
+  version = "v0.3.0"
 
 [[projects]]
   name = "google.golang.org/appengine"
@@ -190,6 +214,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "ff9787f1ab6c7fd78652ad8586f1c68804ad3a998ecb0ddebecf9f37a2094d6f"
+  inputs-digest = "80aac54c606072f13e3f745cc9827e5a0d5d752734669fadd5717db91e054efe"
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -14,20 +14,20 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type Pilot struct {
+type AutoPilot struct {
 	concourse.Client
 	concourse.Team
 	Logger       lager.Logger
 	PollInterval time.Duration
 }
 
-func NewPilot(concourseURL, team, username, password string, logger lager.Logger) (*Pilot, error) {
+func NewAutoPilot(concourseURL, team, username, password string, logger lager.Logger) (*AutoPilot, error) {
 	c, err := newConcourseClient(concourseURL, team, username, password)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Pilot{
+	return &AutoPilot{
 		Client:       c,
 		Team:         c.Team(team),
 		PollInterval: 4 * time.Second,
@@ -35,7 +35,7 @@ func NewPilot(concourseURL, team, username, password string, logger lager.Logger
 	}, nil
 }
 
-func (p *Pilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
+func (p *AutoPilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 	c := make(chan atc.Build)
 	go func() {
 		logger := p.Logger.Session("finished-builds")

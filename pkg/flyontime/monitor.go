@@ -16,12 +16,19 @@ import (
 	"github.com/concourse/go-concourse/concourse"
 )
 
-type Builder interface {
-	Builds() <-chan atc.Build
+//go:generate counterfeiter . Pilot
+
+type Pilot interface {
+	URL() string
+	PausePipeline(pipeline string) (bool, error)
+	UnpausePipeline(pipeline string) (bool, error)
+	CreateJobBuild(pipeline, job string) (atc.Build, error)
+	BuildEvents(job string) (concourse.Events, error)
+	FinishedBuilds(ctx context.Context) <-chan atc.Build
 }
 
 type Monitor struct {
-	pilot *Pilot
+	pilot Pilot
 	log   lager.Logger
 
 	cancel context.CancelFunc // signals to build producer to stop.
@@ -40,7 +47,7 @@ type Monitor struct {
 
 type notifyFunc func(context.Context, atc.Build, *jobHistory) error
 
-func NewMonitor(pilot *Pilot, n Notifier, c Commander, logger lager.Logger) *Monitor {
+func NewMonitor(pilot Pilot, n Notifier, c Commander, logger lager.Logger) *Monitor {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Monitor{
 		pilot: pilot,
@@ -53,7 +60,7 @@ func NewMonitor(pilot *Pilot, n Notifier, c Commander, logger lager.Logger) *Mon
 		stop:     make(chan struct{}),
 
 		history:         make(map[jobKey]*jobHistory),
-		notifiers:       defaultNotifiers(n, pilot.Client),
+		notifiers:       defaultNotifiers(n, pilot),
 		manuallyStarted: make(map[int]func(atc.Build)),
 		muted:           make(map[jobKey]time.Time),
 	}
@@ -250,7 +257,7 @@ func min(a, b int) int {
 	return b
 }
 
-func buildOutput(c concourse.Client, b atc.Build) (string, error) {
+func buildOutput(c Pilot, b atc.Build) (string, error) {
 	events, err := c.BuildEvents(strconv.Itoa(b.ID))
 	if err != nil {
 		return "", err
@@ -315,7 +322,7 @@ type jobStatus struct {
 	New string
 }
 
-func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]notifyFunc {
+func defaultNotifiers(n Notifier, concourse Pilot) map[jobStatus]notifyFunc {
 	dashboardLink := func(b atc.Build) string {
 		return fmt.Sprintf("%s/teams/%s/pipelines/%s/jobs/%s/builds/%s", concourse.URL(), b.TeamName, b.PipelineName, b.JobName, b.Name)
 	}
@@ -340,17 +347,20 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]noti
 		})
 	}
 
+	failed := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		output, _ := buildOutput(concourse, b)
+		return n.Notify(ctx, &Notification{
+			Severity:      SeverityError,
+			Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
+			DashboardLink: dashboardLink(b),
+			Job:           jobFromATCBuild(b),
+			JobOutput:     output,
+		})
+	}
+
 	return map[jobStatus]notifyFunc{
-		{statusSucceeded, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
-			output, _ := buildOutput(concourse, b)
-			return n.Notify(ctx, &Notification{
-				Severity:      SeverityError,
-				Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
-				DashboardLink: dashboardLink(b),
-				Job:           jobFromATCBuild(b),
-				JobOutput:     output,
-			})
-		},
+		{"", statusFailed}:              failed,
+		{statusSucceeded, statusFailed}: failed,
 		{statusFailed, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
 			output, err := buildOutput(concourse, b)
 			if err != nil {
@@ -381,4 +391,10 @@ func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]noti
 		{statusFailed, statusAborted}:    aborted,
 		{statusErrored, statusAborted}:   aborted,
 	}
+}
+
+//go:generate counterfeiter . concourseEvents
+
+type concourseEvents interface {
+	concourse.Events
 }

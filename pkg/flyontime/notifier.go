@@ -36,6 +36,8 @@ type Notification struct {
 	JobOutput     string
 }
 
+//go:generate counterfeiter . Notifier
+
 type Notifier interface {
 	Notify(ctx context.Context, n *Notification) error
 }

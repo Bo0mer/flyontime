@@ -7,6 +7,8 @@ type Command struct {
 	Responses chan<- string
 }
 
+//go:generate counterfeiter . Commander
+
 type Commander interface {
 	Commands() <-chan *Command
 }
