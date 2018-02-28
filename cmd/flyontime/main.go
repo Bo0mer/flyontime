@@ -1,11 +1,11 @@
-// Command flyontime monitors Concourse jobs and sends notifications on
-// significant events.
+// Command flyontime implements interactive Slack/Mattermost bot that monitors
+// Concourse CI jobs and sends notifications on significant events.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"code.cloudfoundry.org/lager"
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
 	"github.com/Bo0mer/flyontime/pkg/mattermost"
 	"github.com/Bo0mer/flyontime/pkg/slacker"
@@ -25,6 +26,7 @@ var (
 	slackChannelID string
 	slackToken     string
 
+	mattermostURL       string
 	mattermostChannelID string
 	mattermostToken     string
 
@@ -32,12 +34,15 @@ var (
 	concourseUsername string
 	concoursePassword string
 	concourseTeam     string
+
+	verbose bool
 )
 
 func init() {
 	flag.StringVar(&slackChannelID, "slack-channel-id", "", "Slack channel id for sending alerts")
 	flag.StringVar(&slackToken, "slack-token", "", "Slack token for sending alerts")
 
+	flag.StringVar(&mattermostURL, "mattermost-url", "", "Mattermost channel id for sending alerts")
 	flag.StringVar(&mattermostChannelID, "mattermost-channel-id", "", "Mattermost channel id for sending alerts")
 	flag.StringVar(&mattermostToken, "mattermost-token", "", "Mattermost token for sending alerts")
 
@@ -45,32 +50,48 @@ func init() {
 	flag.StringVar(&concourseUsername, "concourse-username", "", "Concourse Username")
 	flag.StringVar(&concoursePassword, "concourse-password", "", "Concourse Password")
 	flag.StringVar(&concourseTeam, "concourse-team", "main", "Concourse Team")
+
+	flag.BoolVar(&verbose, "verbose", false, "Enable verbose output")
 }
 
 func main() {
 	flag.Parse()
 
-	c, err := newConcourseClient(concourseURL, concourseTeam, concourseUsername, concoursePassword)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", os.Args[0], err)
-		os.Exit(1)
+	logger := lager.NewLogger("flyontime")
+	lvl := lager.INFO
+	if verbose {
+		lvl = lager.DEBUG
 	}
-	mon := flyontime.NewMonitor(c, notifierFromFlags())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		mon.Monitor(ctx)
-	}()
+	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lvl))
+
+	pilot, err := flyontime.NewAutoPilot(
+		concourseURL,
+		concourseTeam,
+		concourseUsername,
+		concoursePassword,
+		logger.Session("pilot"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	nc := chatFromFlags(logger.Session("messenger"))
+	m := flyontime.NewMonitor(pilot, nc, nc, logger.Session("monitor"))
+	go m.Start()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
-	cancel()
+	m.Stop()
 
 	fmt.Printf("Bye\n")
 }
 
-func notifierFromFlags() (n flyontime.Notifier) {
+type chat interface {
+	flyontime.Notifier
+	flyontime.Commander
+}
+
+func chatFromFlags(logger lager.Logger) (n chat) {
 	if slackToken != "" {
 		n = &slacker.Notifier{
 			Token:     slackToken,
@@ -79,15 +100,17 @@ func notifierFromFlags() (n flyontime.Notifier) {
 	}
 	if mattermostToken != "" {
 		n = &mattermost.Notifier{
+			API:       mattermostURL,
 			Token:     mattermostToken,
 			ChannelID: mattermostChannelID,
+			Logger:    logger,
 		}
 	}
 	return n
 }
 
 func newConcourseClient(url, team, username, password string) (concourse.Client, error) {
-	c := concourse.NewClient(concourseURL, authenticatedClient(username, password), false)
+	c := concourse.NewClient(url, authenticatedClient(username, password), false)
 
 	t := c.Team(team)
 	token, err := t.AuthToken()

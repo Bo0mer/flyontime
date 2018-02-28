@@ -4,104 +4,242 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"code.cloudfoundry.org/lager"
+	"code.cloudfoundry.org/lager/lagerctx"
 	"github.com/concourse/atc"
 	"github.com/concourse/atc/event"
 	"github.com/concourse/go-concourse/concourse"
 )
 
-type concourseClient interface {
-	concourse.Client
+//go:generate counterfeiter . Pilot
+
+type Pilot interface {
+	URL() string
+	PausePipeline(pipeline string) (bool, error)
+	UnpausePipeline(pipeline string) (bool, error)
+	CreateJobBuild(pipeline, job string) (atc.Build, error)
+	BuildEvents(job string) (concourse.Events, error)
+	FinishedBuilds(ctx context.Context) <-chan atc.Build
 }
 
-type concourseEvents interface {
-	concourse.Events
+type Monitor struct {
+	pilot Pilot
+	log   lager.Logger
+
+	cancel context.CancelFunc // signals to build producer to stop.
+	builds <-chan atc.Build
+
+	commands <-chan *Command
+	stop     chan struct{}
+
+	history         map[jobKey]*jobHistory
+	notifiers       map[jobStatus]notifyFunc
+	manuallyStarted map[int]func(b atc.Build)
+
+	mu    sync.Mutex
+	muted map[jobKey]time.Time
 }
 
-//go:generate counterfeiter . concourseClient
-//go:generate counterfeiter . concourseEvents
-//go:generate counterfeiter . Notifier
+type notifyFunc func(context.Context, atc.Build, *jobHistory) error
 
-type JobMonitor struct {
-	concourse concourse.Client
+func NewMonitor(pilot Pilot, n Notifier, c Commander, logger lager.Logger) *Monitor {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &Monitor{
+		pilot: pilot,
+		log:   logger,
 
-	pollInterval time.Duration
-	history      map[jobKey]*jobHistory
-	notifiers    map[jobStatus]func(atc.Build, *jobHistory) error
+		cancel: cancel,
+		builds: pilot.FinishedBuilds(ctx),
 
-	log lager.Logger
-}
+		commands: c.Commands(),
+		stop:     make(chan struct{}),
 
-type Option func(*JobMonitor)
-
-func WithPollInterval(d time.Duration) Option {
-	return func(m *JobMonitor) {
-		m.pollInterval = d
+		history:         make(map[jobKey]*jobHistory),
+		notifiers:       defaultNotifiers(n, pilot),
+		manuallyStarted: make(map[int]func(atc.Build)),
+		muted:           make(map[jobKey]time.Time),
 	}
-}
 
-func WithLogger(log lager.Logger) Option {
-	return func(m *JobMonitor) {
-		m.log = log
-	}
-}
-
-func NewMonitor(concourse concourse.Client, n Notifier, opts ...Option) *JobMonitor {
-	log := lager.NewLogger("flyontime")
-	log.RegisterSink(lager.NewWriterSink(os.Stdout, lager.DEBUG))
-
-	m := &JobMonitor{
-		concourse:    concourse,
-		log:          log,
-		pollInterval: 4 * time.Second,
-		history:      make(map[jobKey]*jobHistory),
-		notifiers:    defaultNotifiers(n, concourse),
-	}
-
-	for _, op := range opts {
-		op(m)
-	}
 	return m
 }
 
-func (n *JobMonitor) Monitor(ctx context.Context) {
-	builds := n.jobs(ctx)
+func (m *Monitor) Start() {
+	m.run()
+}
 
-	for b := range builds {
-		h, ok := n.history[jobKey{b.TeamName, b.PipelineName, b.JobName}]
-		if !ok {
-			h = &jobHistory{}
-		}
+func (m *Monitor) Stop() {
+	m.cancel()
+	close(m.stop)
+}
 
-		if n.shouldNotify(b, h) {
-			n.notify(b, h)
+func (m *Monitor) run() {
+	for {
+		select {
+		case b := <-m.builds:
+			m.handleBuild(m.log.Session("handle-build"), b)
+		case c := <-m.commands:
+			m.handleCommand(m.log.Session("handle-command"), c)
+		case <-m.stop:
+			return
 		}
-		n.updateHistory(b, h)
 	}
 }
 
-func (n *JobMonitor) shouldNotify(build atc.Build, h *jobHistory) bool {
-	n.log.Debug("should-notify", lager.Data{"build": build, "history": h})
-	_, ok := n.notifiers[jobStatus{h.LastStatus, build.Status}]
+func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
+	logger.Info(c.Name, lager.Data{"args": c.Args})
+	switch c.Name {
+	case "rerun", "try again", "retry":
+		m.commandRerun(c)
+	case "pause", "stop":
+		m.commandPause(c)
+	case "unpause", "play":
+		m.commandPlay(c)
+	case "mute", "silence":
+		m.commandMute(c)
+	default:
+		c.Responses <- fmt.Sprintf("Unknown command: %q", c.Name)
+	}
+}
+
+func (m *Monitor) commandRerun(c *Command) {
+	j := c.Job
+	b, err := m.pilot.CreateJobBuild(j.Pipeline, j.Name)
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Running %s failed: %v", c.Job.Name, err)
+		close(c.Responses)
+		return
+	}
+	c.Responses <- fmt.Sprintf("Rerunning %s...", c.Job.Name)
+	m.manuallyStarted[b.ID] = func(b atc.Build) {
+		c.Responses <- fmt.Sprintf("Job %s.", b.Status)
+		close(c.Responses)
+	}
+}
+
+func (m *Monitor) commandPause(c *Command) {
+	defer close(c.Responses)
+
+	ok, err := m.pilot.PausePipeline(c.Job.Pipeline)
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Pausing pipeline %s failed: %v", c.Job.Pipeline, err)
+	}
+	if ok {
+		c.Responses <- fmt.Sprintf("Pipeline %s is now paused.", c.Job.Pipeline)
+	} else {
+		c.Responses <- fmt.Sprintf("Pipeline %s is already paused.", c.Job.Pipeline)
+	}
+}
+
+func (m *Monitor) commandPlay(c *Command) {
+	defer close(c.Responses)
+
+	ok, err := m.pilot.UnpausePipeline(c.Job.Pipeline)
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Unpausing pipeline %s failed: %v", c.Job.Pipeline, err)
+	}
+	if ok {
+		c.Responses <- fmt.Sprintf("Pipeline %s is now unpaused.", c.Job.Pipeline)
+	} else {
+		c.Responses <- fmt.Sprintf("Pipeline %s is already unpaused.", c.Job.Pipeline)
+	}
+}
+
+func (m *Monitor) commandMute(c *Command) {
+	defer close(c.Responses)
+
+	if len(c.Args) == 0 {
+		c.Args = []string{"30m"} // default mute duration
+	}
+	d, err := time.ParseDuration(c.Args[0])
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Invalid duration %q", c.Args[0])
+		return
+	}
+
+	j := c.Job
+	until := time.Now().Add(d)
+	m.mu.Lock()
+	m.muted[jobKey{j.Team, j.Pipeline, j.Name}] = until
+	m.mu.Unlock()
+	c.Responses <- fmt.Sprintf("Muted notifications for %s until %s", j.Name, until.Format(time.Kitchen))
+}
+
+func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
+	if b.OneOff() {
+		logger.Info("skip-one-off")
+		// One off, no need to send notifications.
+		return
+	}
+
+	h, ok := m.history[jobKey{b.TeamName, b.PipelineName, b.JobName}]
+	if !ok {
+		h = &jobHistory{}
+	}
+	defer m.updateHistory(b, h)
+
+	if respond, ok := m.isManuallyStarted(b); ok {
+		// Respond with the build status if it is manually started.
+		logger.Info("respond-to-manually-started")
+		respond(b)
+		delete(m.manuallyStarted, b.ID)
+		return
+	}
+
+	// Send notification if necessary.
+	if m.shouldNotify(logger.Session("should-notify"), b, h) {
+		m.notify(
+			logger.Session("notify", lager.Data{"build": b.ID}),
+			b, h)
+	}
+}
+
+func (m *Monitor) isManuallyStarted(build atc.Build) (respond func(atc.Build), ok bool) {
+	respond, ok = m.manuallyStarted[build.ID]
+	return
+}
+
+func (m *Monitor) shouldNotify(logger lager.Logger, b atc.Build, h *jobHistory) bool {
+	_, ok := m.notifiers[jobStatus{h.LastStatus, b.Status}]
+	if !ok {
+		logger.Debug("no-notifier")
+		return false
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := jobKey{b.TeamName, b.PipelineName, b.JobName}
+	until, muted := m.muted[key]
+	if !muted {
+		return ok
+	}
+
+	if time.Now().Before(until) {
+		logger.Debug("notifications-muted")
+		return false
+	}
+	delete(m.muted, key)
 	return ok
 }
 
-func (n *JobMonitor) notify(build atc.Build, h *jobHistory) {
-	f, ok := n.notifiers[jobStatus{h.LastStatus, build.Status}]
+func (m *Monitor) notify(logger lager.Logger, build atc.Build, h *jobHistory) {
+	f, ok := m.notifiers[jobStatus{h.LastStatus, build.Status}]
 	if !ok {
 		return
 	}
-	if err := f(build, h); err != nil {
-		n.log.Session("notify").Error("fail", err)
+	ctx := lagerctx.NewContext(context.Background(), logger)
+	if err := f(ctx, build, h); err != nil {
+		logger.Error("fail", err)
+		return
 	}
+	logger.Info("done")
 }
 
-func (n *JobMonitor) updateHistory(b atc.Build, h *jobHistory) {
+func (m *Monitor) updateHistory(b atc.Build, h *jobHistory) {
 	if b.Status == statusSucceeded {
 		h.ConsecutiveFailures = 0
 	}
@@ -109,68 +247,7 @@ func (n *JobMonitor) updateHistory(b atc.Build, h *jobHistory) {
 		h.ConsecutiveFailures++
 	}
 	h.LastStatus = b.Status
-	n.history[jobKey{b.TeamName, b.PipelineName, b.JobName}] = h
-}
-
-func (n *JobMonitor) jobs(ctx context.Context) <-chan atc.Build {
-	log := n.log.Session("get-jobs")
-	c := make(chan atc.Build)
-	go func() {
-		t := time.NewTicker(n.pollInterval)
-		defer func() {
-			t.Stop()
-			close(c)
-		}()
-		_, p, err := n.concourse.Builds(concourse.Page{Limit: 1})
-		if err != nil {
-			log.Error("fail", err)
-			return
-		}
-		lastSeen := p.Next.Since
-		var builds []atc.Build
-		for {
-			select {
-			case <-t.C:
-				log := log.Session("recheck")
-				log.Debug("start")
-				builds, p, err = n.concourse.Builds(concourse.Page{Until: lastSeen, Limit: 100})
-				if err != nil {
-					log.Error("fail", err)
-					continue
-				}
-				if p.Next == nil {
-					// No new builds.
-					continue
-				}
-				// If there are more than 100 new builds.
-				if last := p.Next.Since; last-lastSeen > 100 {
-					lastSeen = lastSeen + 100
-				} else {
-					lastSeen = p.Next.Since
-				}
-
-				for _, b := range builds {
-					if b.IsRunning() {
-						// In order to resend the build once it has finished.
-						lastSeen = min(b.ID, lastSeen) - 1
-						continue
-					}
-					c <- b
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return c
-}
-
-func (m *JobMonitor) lastBuild() (int, error) {
-	_, p, err := m.concourse.Builds(concourse.Page{Limit: 1})
-	if err != nil {
-		return 0, err
-	}
-	return p.Next.Since, nil
+	m.history[jobKey{b.TeamName, b.PipelineName, b.JobName}] = h
 }
 
 func min(a, b int) int {
@@ -180,7 +257,7 @@ func min(a, b int) int {
 	return b
 }
 
-func buildOutput(c concourse.Client, b atc.Build) (string, error) {
+func buildOutput(c Pilot, b atc.Build) (string, error) {
 	events, err := c.BuildEvents(strconv.Itoa(b.ID))
 	if err != nil {
 		return "", err
@@ -245,52 +322,79 @@ type jobStatus struct {
 	New string
 }
 
-func defaultNotifiers(n Notifier, concourse concourse.Client) map[jobStatus]func(atc.Build, *jobHistory) error {
-	dashboardLink := func(buildURL string) string {
-		return fmt.Sprintf("%s%s", concourse.URL(), buildURL)
+func defaultNotifiers(n Notifier, concourse Pilot) map[jobStatus]notifyFunc {
+	dashboardLink := func(b atc.Build) string {
+		return fmt.Sprintf("%s/teams/%s/pipelines/%s/jobs/%s/builds/%s", concourse.URL(), b.TeamName, b.PipelineName, b.JobName, b.Name)
 	}
 
 	// errored is used for all states that transition into errored build.
-	errored := func(b atc.Build, h *jobHistory) error {
-		return n.Notify(&Notification{
+	errored := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		return n.Notify(ctx, &Notification{
 			Severity:      SeverityError,
 			Title:         fmt.Sprintf("Job %s from %s has errored.", b.JobName, b.PipelineName),
-			DashboardLink: dashboardLink(b.URL),
+			Job:           jobFromATCBuild(b),
+			DashboardLink: dashboardLink(b),
 		})
 	}
 
-	return map[jobStatus]func(atc.Build, *jobHistory) error{
-		{statusSucceeded, statusFailed}: func(b atc.Build, h *jobHistory) error {
-			output, _ := buildOutput(concourse, b)
-			return n.Notify(&Notification{
-				Severity:      SeverityError,
-				Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
-				DashboardLink: dashboardLink(b.URL),
-				JobOutput:     output,
-			})
-		},
-		{statusFailed, statusFailed}: func(b atc.Build, h *jobHistory) error {
+	// errored is used for all states that transition into aborted build.
+	aborted := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		return n.Notify(ctx, &Notification{
+			Severity:      SeverityError,
+			Title:         fmt.Sprintf("Job %s from %s has been aborted.", b.JobName, b.PipelineName),
+			Job:           jobFromATCBuild(b),
+			DashboardLink: dashboardLink(b),
+		})
+	}
+
+	failed := func(ctx context.Context, b atc.Build, h *jobHistory) error {
+		output, _ := buildOutput(concourse, b)
+		return n.Notify(ctx, &Notification{
+			Severity:      SeverityError,
+			Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
+			DashboardLink: dashboardLink(b),
+			Job:           jobFromATCBuild(b),
+			JobOutput:     output,
+		})
+	}
+
+	return map[jobStatus]notifyFunc{
+		{"", statusFailed}:              failed,
+		{statusSucceeded, statusFailed}: failed,
+		{statusFailed, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
 			output, err := buildOutput(concourse, b)
 			if err != nil {
 				output = ""
 			}
-			return n.Notify(&Notification{
+			return n.Notify(ctx, &Notification{
 				Severity:      SeverityError,
 				Title:         fmt.Sprintf("Job %s from %s is still failing (%d times in a row).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
-				DashboardLink: dashboardLink(b.URL),
+				DashboardLink: dashboardLink(b),
+				Job:           jobFromATCBuild(b),
 				JobOutput:     output,
 			})
 		},
-		{statusFailed, statusSucceeded}: func(b atc.Build, h *jobHistory) error {
-			return n.Notify(&Notification{
+		{statusFailed, statusSucceeded}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
+			return n.Notify(ctx, &Notification{
 				Severity:      SeverityInfo,
 				Title:         fmt.Sprintf("Job %s from %s has recovered after %d failure(s).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
-				DashboardLink: dashboardLink(b.URL),
+				Job:           jobFromATCBuild(b),
+				DashboardLink: dashboardLink(b),
 			})
 		},
 		{"", statusErrored}:              errored,
 		{statusSucceeded, statusErrored}: errored,
 		{statusFailed, statusErrored}:    errored,
 		{statusErrored, statusErrored}:   errored,
+		{"", statusAborted}:              aborted,
+		{statusSucceeded, statusAborted}: aborted,
+		{statusFailed, statusAborted}:    aborted,
+		{statusErrored, statusAborted}:   aborted,
 	}
+}
+
+//go:generate counterfeiter . concourseEvents
+
+type concourseEvents interface {
+	concourse.Events
 }

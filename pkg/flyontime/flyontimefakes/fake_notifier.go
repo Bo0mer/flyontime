@@ -2,16 +2,18 @@
 package flyontimefakes
 
 import (
+	"context"
 	"sync"
 
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
 )
 
 type FakeNotifier struct {
-	NotifyStub        func(n *flyontime.Notification) error
+	NotifyStub        func(ctx context.Context, n *flyontime.Notification) error
 	notifyMutex       sync.RWMutex
 	notifyArgsForCall []struct {
-		n *flyontime.Notification
+		ctx context.Context
+		n   *flyontime.Notification
 	}
 	notifyReturns struct {
 		result1 error
@@ -23,16 +25,17 @@ type FakeNotifier struct {
 	invocationsMutex sync.RWMutex
 }
 
-func (fake *FakeNotifier) Notify(n *flyontime.Notification) error {
+func (fake *FakeNotifier) Notify(ctx context.Context, n *flyontime.Notification) error {
 	fake.notifyMutex.Lock()
 	ret, specificReturn := fake.notifyReturnsOnCall[len(fake.notifyArgsForCall)]
 	fake.notifyArgsForCall = append(fake.notifyArgsForCall, struct {
-		n *flyontime.Notification
-	}{n})
-	fake.recordInvocation("Notify", []interface{}{n})
+		ctx context.Context
+		n   *flyontime.Notification
+	}{ctx, n})
+	fake.recordInvocation("Notify", []interface{}{ctx, n})
 	fake.notifyMutex.Unlock()
 	if fake.NotifyStub != nil {
-		return fake.NotifyStub(n)
+		return fake.NotifyStub(ctx, n)
 	}
 	if specificReturn {
 		return ret.result1
@@ -46,10 +49,10 @@ func (fake *FakeNotifier) NotifyCallCount() int {
 	return len(fake.notifyArgsForCall)
 }
 
-func (fake *FakeNotifier) NotifyArgsForCall(i int) *flyontime.Notification {
+func (fake *FakeNotifier) NotifyArgsForCall(i int) (context.Context, *flyontime.Notification) {
 	fake.notifyMutex.RLock()
 	defer fake.notifyMutex.RUnlock()
-	return fake.notifyArgsForCall[i].n
+	return fake.notifyArgsForCall[i].ctx, fake.notifyArgsForCall[i].n
 }
 
 func (fake *FakeNotifier) NotifyReturns(result1 error) {
