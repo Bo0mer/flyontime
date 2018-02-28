@@ -105,7 +105,7 @@ func (s *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error 
 			slack.Attachment{
 				Color:      colorFor(n.Severity),
 				AuthorName: "Concourse",
-				AuthorIcon: "",
+				AuthorIcon: "https://concourse.ci/favicon.ico",
 				Title:      n.Title,
 				TitleLink:  n.DashboardLink,
 				Text:       formatCode(n.JobOutput),
