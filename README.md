@@ -1,7 +1,7 @@
 # flyontime
 
-Command flyontime monitors Concourse jobs and sends notifications on significant
-events.
+Command flyontime implements interactive Slack/Mattermost bot that monitors
+Concourse CI jobs and sends notifications on significant events.
 
 ## Usage
 
@@ -18,20 +18,14 @@ Full usage help can be printed by providing the `--help` flag:
 
 ```
 Usage of flyontime:
-  -concourse-password string
-    	Concourse Password
-  -concourse-team string
-    	Concourse Team (default "main")
-  -concourse-url string
-    	Concourse URL (default "http://localhost:8080")
-  -concourse-username string
-    	Concourse Username
-  -mattermost-channel-id string
-    	Mattermost channel id for sending alerts
-  -mattermost-token string
-    	Mattermost token for sending alerts
-  -slack-channel-id string
-    	Slack channel id for sending alerts
-  -slack-token string
-    	Slack token for sending alerts
+  -concourse-password="": Concourse Password
+  -concourse-team="main": Concourse Team
+  -concourse-url="http://localhost:8080": Concourse URL
+  -concourse-username="": Concourse Username
+  -mattermost-channel-id="": Mattermost channel id for sending alerts
+  -mattermost-token="": Mattermost token for sending alerts
+  -mattermost-url="": Mattermost channel id for sending alerts
+  -slack-channel-id="": Slack channel id for sending alerts
+  -slack-token="": Slack token for sending alerts
+  -verbose=false: Enable verbose output
 ```

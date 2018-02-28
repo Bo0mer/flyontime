@@ -1,5 +1,5 @@
-// Command flyontime monitors Concourse jobs and sends notifications on
-// significant events.
+// Command flyontime implements interactive Slack/Mattermost bot that monitors
+// Concourse CI jobs and sends notifications on significant events.
 package main
 
 import (
