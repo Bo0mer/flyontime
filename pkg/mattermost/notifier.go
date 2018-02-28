@@ -90,34 +90,44 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 	}
 
 	go func() {
-		ws, err := model.NewWebSocketClient4(api.String(), mm.Token)
-		if err != nil {
-			logger.Error("websocket-connect.fail", err)
-			return
-		}
-		ws.Listen()
-
-		for ev := range ws.EventChannel {
-			if ev.EventType() != "posted" {
-				logger.Debug("skip-message")
-				continue
-			}
-			postJSON, ok := ev.Data["post"].(string)
-			if !ok {
-				logger.Error("get-post-data.fail", err)
-				continue
-			}
-			p := new(model.Post)
-			if err := json.Unmarshal([]byte(postJSON), p); err != nil {
-				logger.Error("parse-post-data.fail", err)
-				continue
-			}
-			if p.UserId == mm.self.Id {
-				// Do not reply to self.
-				continue
+		for {
+			ws, err := model.NewWebSocketClient4(api.String(), mm.Token)
+			if err != nil {
+				logger.Error("websocket-connect.fail", err)
+				return
 			}
 
-			mm.handleReply(logger.Session("handle-reply"), p, p.Message)
+			ws.Listen()
+
+			for ev := range ws.EventChannel {
+				if ev.EventType() != "posted" {
+					logger.Debug("skip-message")
+					continue
+				}
+				postJSON, ok := ev.Data["post"].(string)
+				if !ok {
+					logger.Error("get-post-data.fail", err)
+					continue
+				}
+				p := new(model.Post)
+				if err := json.Unmarshal([]byte(postJSON), p); err != nil {
+					logger.Error("parse-post-data.fail", err)
+					continue
+				}
+				if p.UserId == mm.self.Id {
+					// Do not reply to self.
+					continue
+				}
+
+				mm.handleReply(logger.Session("handle-reply"), p, p.Message)
+			}
+
+			if ws.ListenError != nil {
+				logger.Error("fail-will-retry", ws.ListenError)
+				continue
+			}
+			logger.Info("exit")
+			break
 		}
 	}()
 
