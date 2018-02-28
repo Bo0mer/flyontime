@@ -257,13 +257,16 @@ func min(a, b int) int {
 	return b
 }
 
-func buildOutput(c Pilot, b atc.Build) (string, error) {
+func buildOutput(ctx context.Context, c Pilot, b atc.Build) string {
+	logger := lagerctx.WithSession(ctx, "get-build-output")
 	events, err := c.BuildEvents(strconv.Itoa(b.ID))
 	if err != nil {
-		return "", err
+		logger.Error("get-build-events.fail", err)
+		return ""
 	}
 	if events == nil {
-		return "", nil
+		logger.Info("no-build-events")
+		return ""
 	}
 	defer events.Close()
 
@@ -273,9 +276,10 @@ func buildOutput(c Pilot, b atc.Build) (string, error) {
 		ev, err := events.NextEvent()
 		if err != nil {
 			if err == io.EOF {
-				return sb.String(), nil
+				return sb.String()
 			} else {
-				return "", fmt.Errorf("flyontime: failed to parse event: %v", err)
+				logger.Error("parse-event-fail-will-skip", err)
+				continue
 			}
 		}
 
@@ -348,7 +352,7 @@ func defaultNotifiers(n Notifier, concourse Pilot) map[jobStatus]notifyFunc {
 	}
 
 	failed := func(ctx context.Context, b atc.Build, h *jobHistory) error {
-		output, _ := buildOutput(concourse, b)
+		output := buildOutput(ctx, concourse, b)
 		return n.Notify(ctx, &Notification{
 			Severity:      SeverityError,
 			Title:         fmt.Sprintf("Job %s from %s has failed.", b.JobName, b.PipelineName),
@@ -362,10 +366,7 @@ func defaultNotifiers(n Notifier, concourse Pilot) map[jobStatus]notifyFunc {
 		{"", statusFailed}:              failed,
 		{statusSucceeded, statusFailed}: failed,
 		{statusFailed, statusFailed}: func(ctx context.Context, b atc.Build, h *jobHistory) error {
-			output, err := buildOutput(concourse, b)
-			if err != nil {
-				output = ""
-			}
+			output := buildOutput(ctx, concourse, b)
 			return n.Notify(ctx, &Notification{
 				Severity:      SeverityError,
 				Title:         fmt.Sprintf("Job %s from %s is still failing (%d times in a row).", b.JobName, b.PipelineName, h.ConsecutiveFailures),
