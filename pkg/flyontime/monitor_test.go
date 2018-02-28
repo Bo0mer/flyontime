@@ -181,115 +181,237 @@ var _ = Describe("Monitor", func() {
 		})
 
 		Context("and it is pause", func() {
-			BeforeEach(func() {
-				c.Name = "pause"
-				c.Job = &Job{
-					Team:     "t1",
-					Pipeline: "p1",
-					Name:     "j1",
-				}
-				commands <- c
-			})
-
-			Context("and pausing the pipeline succeeds", func() {
-
-				It("should pause the pipeline that the job is part of", func() {
-					Eventually(pilot.PausePipelineCallCount).Should(Equal(1))
-					argPipeline := pilot.PausePipelineArgsForCall(0)
-					Ω(argPipeline).Should(Equal("p1"))
-				})
-
-				Context("but it is already pasued", func() {
-					BeforeEach(func() {
-						pilot.PausePipelineReturns(false, nil)
-					})
-
-					It("still replies with success", func() {
-						var resp string
-						Eventually(responses).Should(Receive(&resp))
-						Ω(resp).Should(ContainSubstring("Pipeline p1 is already paused"))
-					})
-				})
-
-				Context("and it is not already paused", func() {
-					BeforeEach(func() {
-						pilot.PausePipelineReturns(true, nil)
-					})
-
-					It("replies with success", func() {
-						var resp string
-						Eventually(responses).Should(Receive(&resp))
-						Ω(resp).Should(ContainSubstring("Pipeline p1 is now paused"))
-					})
-				})
-			})
-
-			Context("and pausing the pipeline fails", func() {
+			Context("with no arguments", func() {
 				BeforeEach(func() {
-					pilot.PausePipelineReturns(false, errors.New("kuku"))
+					c.Name = "pause"
+					c.Job = &Job{
+						Team:     "t1",
+						Pipeline: "p1",
+						Name:     "j1",
+					}
+					commands <- c
 				})
 
-				It("replies with failure", func() {
-					var resp string
-					Eventually(responses).Should(Receive(&resp))
-					Ω(resp).Should(ContainSubstring("Pausing pipeline p1 failed: kuku"))
-				})
-			})
-		})
+				Context("and pausing the pipeline succeeds", func() {
 
-		Context("and it is play", func() {
-			BeforeEach(func() {
-				c.Name = "play"
-				c.Job = &Job{
-					Team:     "t1",
-					Pipeline: "p1",
-					Name:     "j1",
-				}
-				commands <- c
-			})
-
-			Context("and unapusing the pipeline succeeds", func() {
-
-				It("should unpause the pipeline that the job is part of", func() {
-					Eventually(pilot.UnpausePipelineCallCount).Should(Equal(1))
-					argPipeline := pilot.UnpausePipelineArgsForCall(0)
-					Ω(argPipeline).Should(Equal("p1"))
-				})
-
-				Context("but it is not pasued", func() {
-					BeforeEach(func() {
-						pilot.UnpausePipelineReturns(false, nil)
+					It("should pause the pipeline that the job is part of", func() {
+						Eventually(pilot.PauseJobCallCount).Should(Equal(1))
+						argPipeline, argJob := pilot.PauseJobArgsForCall(0)
+						Ω(argPipeline).Should(Equal("p1"))
+						Ω(argJob).Should(Equal("j1"))
 					})
 
-					It("still replies with success", func() {
+					Context("but it is already pasued", func() {
+						BeforeEach(func() {
+							pilot.PauseJobReturns(false, nil)
+						})
+
+						It("still replies with success", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Job j1 is already paused"))
+						})
+					})
+
+					Context("and it is not already paused", func() {
+						BeforeEach(func() {
+							pilot.PauseJobReturns(true, nil)
+						})
+
+						It("replies with success", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Job j1 is now paused"))
+						})
+					})
+				})
+
+				Context("and pausing the job fails", func() {
+					BeforeEach(func() {
+						pilot.PauseJobReturns(false, errors.New("kuku"))
+					})
+
+					It("replies with failure", func() {
 						var resp string
 						Eventually(responses).Should(Receive(&resp))
-						Ω(resp).Should(ContainSubstring("Pipeline p1 is already unpaused"))
-					})
-				})
-
-				Context("and it is not unpaused", func() {
-					BeforeEach(func() {
-						pilot.UnpausePipelineReturns(true, nil)
-					})
-
-					It("replies with success", func() {
-						var resp string
-						Eventually(responses).Should(Receive(&resp))
-						Ω(resp).Should(ContainSubstring("Pipeline p1 is now unpaused"))
+						Ω(resp).Should(ContainSubstring("Pausing job j1 failed: kuku"))
 					})
 				})
 			})
 
-			Context("and unpausing the pipeline fails", func() {
+			Context("with argument 'pipeline'", func() {
 				BeforeEach(func() {
-					pilot.UnpausePipelineReturns(false, errors.New("kuku"))
+					c.Name = "pause"
+					c.Args = []string{"pipeline"}
+					c.Job = &Job{
+						Team:     "t1",
+						Pipeline: "p1",
+						Name:     "j1",
+					}
+					commands <- c
 				})
 
-				It("replies with failure", func() {
-					var resp string
-					Eventually(responses).Should(Receive(&resp))
-					Ω(resp).Should(ContainSubstring("Unpausing pipeline p1 failed: kuku"))
+				Context("and pausing the pipeline succeeds", func() {
+
+					It("should pause the pipeline that the job is part of", func() {
+						Eventually(pilot.PausePipelineCallCount).Should(Equal(1))
+						argPipeline := pilot.PausePipelineArgsForCall(0)
+						Ω(argPipeline).Should(Equal("p1"))
+					})
+
+					Context("but it is already pasued", func() {
+						BeforeEach(func() {
+							pilot.PausePipelineReturns(false, nil)
+						})
+
+						It("still replies with success", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Pipeline p1 is already paused"))
+						})
+					})
+
+					Context("and it is not already paused", func() {
+						BeforeEach(func() {
+							pilot.PausePipelineReturns(true, nil)
+						})
+
+						It("replies with success", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Pipeline p1 is now paused"))
+						})
+					})
+				})
+
+				Context("and pausing the pipeline fails", func() {
+					BeforeEach(func() {
+						pilot.PausePipelineReturns(false, errors.New("ruku"))
+					})
+
+					It("replies with failure", func() {
+						var resp string
+						Eventually(responses).Should(Receive(&resp))
+						Ω(resp).Should(ContainSubstring("Pausing pipeline p1 failed: ruku"))
+					})
+				})
+			})
+
+			Context("and it is play", func() {
+				Context("with no arguments", func() {
+					BeforeEach(func() {
+						c.Name = "play"
+						c.Job = &Job{
+							Team:     "t1",
+							Pipeline: "p1",
+							Name:     "j1",
+						}
+						commands <- c
+					})
+
+					Context("and unapusing the job succeeds", func() {
+
+						It("should unpause the job", func() {
+							Eventually(pilot.UnpauseJobCallCount).Should(Equal(1))
+							argPipeline, argJob := pilot.UnpauseJobArgsForCall(0)
+							Ω(argPipeline).Should(Equal("p1"))
+							Ω(argJob).Should(Equal("j1"))
+						})
+
+						Context("but it is not pasued", func() {
+							BeforeEach(func() {
+								pilot.UnpauseJobReturns(false, nil)
+							})
+
+							It("still replies with success", func() {
+								var resp string
+								Eventually(responses).Should(Receive(&resp))
+								Ω(resp).Should(ContainSubstring("Job j1 is already unpaused"))
+							})
+						})
+
+						Context("and it is not unpaused", func() {
+							BeforeEach(func() {
+								pilot.UnpauseJobReturns(true, nil)
+							})
+
+							It("replies with success", func() {
+								var resp string
+								Eventually(responses).Should(Receive(&resp))
+								Ω(resp).Should(ContainSubstring("Job j1 is now unpaused"))
+							})
+						})
+					})
+
+					Context("and unpausing the job fails", func() {
+						BeforeEach(func() {
+							pilot.UnpauseJobReturns(false, errors.New("kuku"))
+						})
+
+						It("replies with failure", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Unpausing job j1 failed: kuku"))
+						})
+					})
+				})
+
+				Context("with argument 'pipeline'", func() {
+					BeforeEach(func() {
+						c.Name = "play"
+						c.Args = []string{"pipeline"}
+						c.Job = &Job{
+							Team:     "t1",
+							Pipeline: "p1",
+							Name:     "j1",
+						}
+						commands <- c
+					})
+
+					Context("and unapusing the pipeline succeeds", func() {
+
+						It("should unpause the pipeline that the job is part of", func() {
+							Eventually(pilot.UnpausePipelineCallCount).Should(Equal(1))
+							argPipeline := pilot.UnpausePipelineArgsForCall(0)
+							Ω(argPipeline).Should(Equal("p1"))
+						})
+
+						Context("but it is not pasued", func() {
+							BeforeEach(func() {
+								pilot.UnpausePipelineReturns(false, nil)
+							})
+
+							It("still replies with success", func() {
+								var resp string
+								Eventually(responses).Should(Receive(&resp))
+								Ω(resp).Should(ContainSubstring("Pipeline p1 is already unpaused"))
+							})
+						})
+
+						Context("and it is not unpaused", func() {
+							BeforeEach(func() {
+								pilot.UnpausePipelineReturns(true, nil)
+							})
+
+							It("replies with success", func() {
+								var resp string
+								Eventually(responses).Should(Receive(&resp))
+								Ω(resp).Should(ContainSubstring("Pipeline p1 is now unpaused"))
+							})
+						})
+					})
+
+					Context("and unpausing the pipeline fails", func() {
+						BeforeEach(func() {
+							pilot.UnpausePipelineReturns(false, errors.New("kuku"))
+						})
+
+						It("replies with failure", func() {
+							var resp string
+							Eventually(responses).Should(Receive(&resp))
+							Ω(resp).Should(ContainSubstring("Unpausing pipeline p1 failed: kuku"))
+						})
+					})
 				})
 			})
 		})

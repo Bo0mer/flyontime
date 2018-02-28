@@ -46,6 +46,34 @@ type FakePilot struct {
 		result1 bool
 		result2 error
 	}
+	PauseJobStub        func(pipeline, job string) (bool, error)
+	pauseJobMutex       sync.RWMutex
+	pauseJobArgsForCall []struct {
+		pipeline string
+		job      string
+	}
+	pauseJobReturns struct {
+		result1 bool
+		result2 error
+	}
+	pauseJobReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
+	UnpauseJobStub        func(pipeline, job string) (bool, error)
+	unpauseJobMutex       sync.RWMutex
+	unpauseJobArgsForCall []struct {
+		pipeline string
+		job      string
+	}
+	unpauseJobReturns struct {
+		result1 bool
+		result2 error
+	}
+	unpauseJobReturnsOnCall map[int]struct {
+		result1 bool
+		result2 error
+	}
 	CreateJobBuildStub        func(pipeline, job string) (atc.Build, error)
 	createJobBuildMutex       sync.RWMutex
 	createJobBuildArgsForCall []struct {
@@ -230,6 +258,110 @@ func (fake *FakePilot) UnpausePipelineReturnsOnCall(i int, result1 bool, result2
 	}{result1, result2}
 }
 
+func (fake *FakePilot) PauseJob(pipeline string, job string) (bool, error) {
+	fake.pauseJobMutex.Lock()
+	ret, specificReturn := fake.pauseJobReturnsOnCall[len(fake.pauseJobArgsForCall)]
+	fake.pauseJobArgsForCall = append(fake.pauseJobArgsForCall, struct {
+		pipeline string
+		job      string
+	}{pipeline, job})
+	fake.recordInvocation("PauseJob", []interface{}{pipeline, job})
+	fake.pauseJobMutex.Unlock()
+	if fake.PauseJobStub != nil {
+		return fake.PauseJobStub(pipeline, job)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fake.pauseJobReturns.result1, fake.pauseJobReturns.result2
+}
+
+func (fake *FakePilot) PauseJobCallCount() int {
+	fake.pauseJobMutex.RLock()
+	defer fake.pauseJobMutex.RUnlock()
+	return len(fake.pauseJobArgsForCall)
+}
+
+func (fake *FakePilot) PauseJobArgsForCall(i int) (string, string) {
+	fake.pauseJobMutex.RLock()
+	defer fake.pauseJobMutex.RUnlock()
+	return fake.pauseJobArgsForCall[i].pipeline, fake.pauseJobArgsForCall[i].job
+}
+
+func (fake *FakePilot) PauseJobReturns(result1 bool, result2 error) {
+	fake.PauseJobStub = nil
+	fake.pauseJobReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakePilot) PauseJobReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.PauseJobStub = nil
+	if fake.pauseJobReturnsOnCall == nil {
+		fake.pauseJobReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.pauseJobReturnsOnCall[i] = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakePilot) UnpauseJob(pipeline string, job string) (bool, error) {
+	fake.unpauseJobMutex.Lock()
+	ret, specificReturn := fake.unpauseJobReturnsOnCall[len(fake.unpauseJobArgsForCall)]
+	fake.unpauseJobArgsForCall = append(fake.unpauseJobArgsForCall, struct {
+		pipeline string
+		job      string
+	}{pipeline, job})
+	fake.recordInvocation("UnpauseJob", []interface{}{pipeline, job})
+	fake.unpauseJobMutex.Unlock()
+	if fake.UnpauseJobStub != nil {
+		return fake.UnpauseJobStub(pipeline, job)
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fake.unpauseJobReturns.result1, fake.unpauseJobReturns.result2
+}
+
+func (fake *FakePilot) UnpauseJobCallCount() int {
+	fake.unpauseJobMutex.RLock()
+	defer fake.unpauseJobMutex.RUnlock()
+	return len(fake.unpauseJobArgsForCall)
+}
+
+func (fake *FakePilot) UnpauseJobArgsForCall(i int) (string, string) {
+	fake.unpauseJobMutex.RLock()
+	defer fake.unpauseJobMutex.RUnlock()
+	return fake.unpauseJobArgsForCall[i].pipeline, fake.unpauseJobArgsForCall[i].job
+}
+
+func (fake *FakePilot) UnpauseJobReturns(result1 bool, result2 error) {
+	fake.UnpauseJobStub = nil
+	fake.unpauseJobReturns = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakePilot) UnpauseJobReturnsOnCall(i int, result1 bool, result2 error) {
+	fake.UnpauseJobStub = nil
+	if fake.unpauseJobReturnsOnCall == nil {
+		fake.unpauseJobReturnsOnCall = make(map[int]struct {
+			result1 bool
+			result2 error
+		})
+	}
+	fake.unpauseJobReturnsOnCall[i] = struct {
+		result1 bool
+		result2 error
+	}{result1, result2}
+}
+
 func (fake *FakePilot) CreateJobBuild(pipeline string, job string) (atc.Build, error) {
 	fake.createJobBuildMutex.Lock()
 	ret, specificReturn := fake.createJobBuildReturnsOnCall[len(fake.createJobBuildArgsForCall)]
@@ -390,6 +522,10 @@ func (fake *FakePilot) Invocations() map[string][][]interface{} {
 	defer fake.pausePipelineMutex.RUnlock()
 	fake.unpausePipelineMutex.RLock()
 	defer fake.unpausePipelineMutex.RUnlock()
+	fake.pauseJobMutex.RLock()
+	defer fake.pauseJobMutex.RUnlock()
+	fake.unpauseJobMutex.RLock()
+	defer fake.unpauseJobMutex.RUnlock()
 	fake.createJobBuildMutex.RLock()
 	defer fake.createJobBuildMutex.RUnlock()
 	fake.buildEventsMutex.RLock()

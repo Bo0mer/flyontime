@@ -22,6 +22,8 @@ type Pilot interface {
 	URL() string
 	PausePipeline(pipeline string) (bool, error)
 	UnpausePipeline(pipeline string) (bool, error)
+	PauseJob(pipeline, job string) (bool, error)
+	UnpauseJob(pipeline, job string) (bool, error)
 	CreateJobBuild(pipeline, job string) (atc.Build, error)
 	BuildEvents(job string) (concourse.Events, error)
 	FinishedBuilds(ctx context.Context) <-chan atc.Build
@@ -124,29 +126,57 @@ func (m *Monitor) commandRerun(c *Command) {
 func (m *Monitor) commandPause(c *Command) {
 	defer close(c.Responses)
 
-	ok, err := m.pilot.PausePipeline(c.Job.Pipeline)
+	if len(c.Args) > 0 && c.Args[0] == "pipeline" {
+		ok, err := m.pilot.PausePipeline(c.Job.Pipeline)
+		if err != nil {
+			c.Responses <- fmt.Sprintf("Pausing pipeline %s failed: %v", c.Job.Pipeline, err)
+		}
+		if ok {
+			c.Responses <- fmt.Sprintf("Pipeline %s is now paused.", c.Job.Pipeline)
+		} else {
+			c.Responses <- fmt.Sprintf("Pipeline %s is already paused.", c.Job.Pipeline)
+		}
+		return
+	}
+
+	ok, err := m.pilot.PauseJob(c.Job.Pipeline, c.Job.Name)
 	if err != nil {
-		c.Responses <- fmt.Sprintf("Pausing pipeline %s failed: %v", c.Job.Pipeline, err)
+		c.Responses <- fmt.Sprintf("Pausing job %s failed: %v", c.Job.Name, err)
 	}
 	if ok {
-		c.Responses <- fmt.Sprintf("Pipeline %s is now paused.", c.Job.Pipeline)
+		c.Responses <- fmt.Sprintf("Job %s is now paused.", c.Job.Name)
 	} else {
-		c.Responses <- fmt.Sprintf("Pipeline %s is already paused.", c.Job.Pipeline)
+		c.Responses <- fmt.Sprintf("Job %s is already paused.", c.Job.Name)
 	}
+	return
 }
 
 func (m *Monitor) commandPlay(c *Command) {
 	defer close(c.Responses)
 
-	ok, err := m.pilot.UnpausePipeline(c.Job.Pipeline)
+	if len(c.Args) > 0 && c.Args[0] == "pipeline" {
+		ok, err := m.pilot.UnpausePipeline(c.Job.Pipeline)
+		if err != nil {
+			c.Responses <- fmt.Sprintf("Unpausing pipeline %s failed: %v", c.Job.Pipeline, err)
+		}
+		if ok {
+			c.Responses <- fmt.Sprintf("Pipeline %s is now unpaused.", c.Job.Pipeline)
+		} else {
+			c.Responses <- fmt.Sprintf("Pipeline %s is already unpaused.", c.Job.Pipeline)
+		}
+		return
+	}
+
+	ok, err := m.pilot.UnpauseJob(c.Job.Pipeline, c.Job.Name)
 	if err != nil {
-		c.Responses <- fmt.Sprintf("Unpausing pipeline %s failed: %v", c.Job.Pipeline, err)
+		c.Responses <- fmt.Sprintf("Unpausing job %s failed: %v", c.Job.Name, err)
 	}
 	if ok {
-		c.Responses <- fmt.Sprintf("Pipeline %s is now unpaused.", c.Job.Pipeline)
+		c.Responses <- fmt.Sprintf("Job %s is now unpaused.", c.Job.Name)
 	} else {
-		c.Responses <- fmt.Sprintf("Pipeline %s is already unpaused.", c.Job.Pipeline)
+		c.Responses <- fmt.Sprintf("Job %s is already unpaused.", c.Job.Name)
 	}
+	return
 }
 
 func (m *Monitor) commandMute(c *Command) {

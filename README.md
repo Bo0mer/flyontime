@@ -16,8 +16,8 @@ message. The following commands are currently supported:
 * `rerun`, `retry` - Rerun the job and post its new status.
 * `mute [duration]`, `silence [duration]` - Mute notifications for this
   particular job for `duration` (e.g. `mute 30m`).
-* `pause`, `stop` - Pause the pipeline which the job is part of.
-* `unapuse`, `play` - Pause the pipeline which the job is part of.
+* `pause [pipeline]`, `stop [pipeline]` - Pause the job (or pipeline, which the job is part of).
+* `unapuse [pipeline]`, `play [pipeline]` - Pause the job (or pipeline, which the job is part of).
 
 ## Usage
 
