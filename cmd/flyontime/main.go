@@ -64,7 +64,7 @@ func main() {
 	}
 	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lvl))
 
-	pilot, err := flyontime.NewPilot(
+	pilot, err := flyontime.NewAutoPilot(
 		concourseURL,
 		concourseTeam,
 		concourseUsername,
