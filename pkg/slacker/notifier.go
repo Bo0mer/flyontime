@@ -3,9 +3,12 @@ package slacker
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 	"sync"
 
+	"code.cloudfoundry.org/lager"
 	"github.com/Bo0mer/flyontime/pkg/flyontime"
 	"github.com/lunixbochs/vtclean"
 	"github.com/nlopes/slack"
@@ -15,6 +18,7 @@ import (
 type Notifier struct {
 	Token     string
 	ChannelID string
+	Logger    lager.Logger
 
 	initOnce sync.Once
 	slack    *slack.Client
@@ -31,6 +35,10 @@ func (s *Notifier) init() {
 		s.commands = make(chan *flyontime.Command)
 		s.callbacks = make(map[string]*flyontime.Notification)
 		s.messages = make(map[messageKey]*slack.MessageEvent)
+		if s.Logger == nil {
+			s.Logger = lager.NewLogger("")
+		}
+		s.updateBotUser()
 	})
 }
 
@@ -120,6 +128,36 @@ func (s *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error 
 	}
 	s.callbacks[callbackID] = n
 	return nil
+}
+
+func (s *Notifier) updateBotUser() {
+	logger := s.Logger.Session("update-user")
+	path, err := tempLogoFile()
+	if err != nil {
+		logger.Error("write-tmp-user-photo-file.fail", err)
+		return
+	}
+	if err := s.slack.SetUserPhoto(path, slack.UserSetPhotoParams{}); err != nil {
+		logger.Error("set-user-photo.fail", err)
+		return
+	}
+
+	if err := os.RemoveAll(path); err != nil {
+		logger.Error("cleanup-tmp-user-photo-file.fail,", err)
+		return
+	}
+	logger.Info("done")
+}
+
+func tempLogoFile() (string, error) {
+	fd, err := ioutil.TempFile("", "logo.png")
+	if err != nil {
+		return "", err
+	}
+	defer fd.Close()
+	_, err = fd.Write(concourseLogoPNG[:])
+
+	return fd.Name(), nil
 }
 
 func colorFor(severity flyontime.Severity) string {

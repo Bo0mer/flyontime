@@ -96,6 +96,7 @@ func chatFromFlags(logger lager.Logger) (n chat) {
 		n = &slacker.Notifier{
 			Token:     slackToken,
 			ChannelID: slackChannelID,
+			Logger:    logger,
 		}
 	}
 	if mattermostToken != "" {
