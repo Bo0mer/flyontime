@@ -103,6 +103,8 @@ func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
 		m.commandPlay(c)
 	case "mute", "silence":
 		m.commandMute(c)
+	case "unmute":
+		m.commandUnmute(c)
 	default:
 		c.Responses <- fmt.Sprintf("Unknown command: %q", c.Name)
 	}
@@ -197,6 +199,16 @@ func (m *Monitor) commandMute(c *Command) {
 	m.muted[jobKey{j.Team, j.Pipeline, j.Name}] = until
 	m.mu.Unlock()
 	c.Responses <- fmt.Sprintf("Muted notifications for %s until %s", j.Name, until.Format(time.Kitchen))
+}
+
+func (m *Monitor) commandUnmute(c *Command) {
+	defer close(c.Responses)
+
+	j := c.Job
+	m.mu.Lock()
+	delete(m.muted, jobKey{j.Team, j.Pipeline, j.Name})
+	m.mu.Unlock()
+	c.Responses <- fmt.Sprintf("Notifications for %s are back on.", j.Name)
 }
 
 func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {

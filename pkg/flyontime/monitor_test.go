@@ -180,6 +180,57 @@ var _ = Describe("Monitor", func() {
 			})
 		})
 
+		Context("and it it unmute", func() {
+			Context("and the job was previously muted", func() {
+				var j *Job
+				BeforeEach(func() {
+					j = &Job{
+						Team:     "t1",
+						Pipeline: "p1",
+						Name:     "j1",
+					}
+
+					go func() {
+						commands <- &Command{
+							Name:      "mute",
+							Job:       j,
+							Responses: make(chan string, 1),
+						}
+
+						commands <- &Command{
+							Name:      "unmute",
+							Job:       j,
+							Responses: responses,
+						}
+					}()
+				})
+
+				It("should say that it is unmuting notifications for the job", func() {
+					var resp string
+					Eventually(responses).Should(Receive(&resp))
+					Ω(resp).Should(ContainSubstring("Notifications for j1 are back on"))
+				})
+
+				Context("and the job goes into bad state", func() {
+					BeforeEach(func() {
+						builds <- atc.Build{
+							ID:           42,
+							Status:       "errored",
+							TeamName:     "t1",
+							PipelineName: "p1",
+							JobName:      "j1",
+						}
+					})
+
+					It("sends a notification", func() {
+						Eventually(notifier.NotifyCallCount).Should(Equal(1))
+						_, argNotification := notifier.NotifyArgsForCall(0)
+						Ω(argNotification.Job).Should(Equal(*j))
+					})
+				})
+			})
+		})
+
 		Context("and it is pause", func() {
 			Context("with no arguments", func() {
 				BeforeEach(func() {
