@@ -18,7 +18,7 @@ message. The following commands are currently supported:
   particular job for `duration` (e.g. `mute 30m`).
 * `unmute` - Turn notifications for muted job back on.
 * `pause [pipeline]`, `stop [pipeline]` - Pause the job (or pipeline, which the job is part of).
-* `unapuse [pipeline]`, `play [pipeline]` - Pause the job (or pipeline, which the job is part of).
+* `unpause [pipeline]`, `play [pipeline]` - Pause the job (or pipeline, which the job is part of).
 
 ## Usage
 

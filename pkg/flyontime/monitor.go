@@ -105,8 +105,10 @@ func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
 		m.commandMute(c)
 	case "unmute":
 		m.commandUnmute(c)
+	case "help":
+		m.commandHelp(c)
 	default:
-		c.Responses <- fmt.Sprintf("Unknown command: %q", c.Name)
+		c.Responses <- fmt.Sprintf("Unknown command: %q\nTo see the list of all available commands, use `help`", c.Name)
 	}
 }
 
@@ -209,6 +211,21 @@ func (m *Monitor) commandUnmute(c *Command) {
 	delete(m.muted, jobKey{j.Team, j.Pipeline, j.Name})
 	m.mu.Unlock()
 	c.Responses <- fmt.Sprintf("Notifications for %s are back on.", j.Name)
+}
+
+func (m *Monitor) commandHelp(c *Command) {
+	const usage = `List of supported reply commands:
+
+	rerun, retry 			Rerun the job and reply with its new status.
+	mute [duration]			Mute notifications for the job for the specified duration.
+	unmute					Turn job notifications back on.
+	pause, stop				Pause the job.
+	unpause, play			Unpause the job.
+	pause pipeline			Pause the pipeline the job is part of.
+	unpause pipeline		Unpause the pipeline the job is part of.`
+
+	defer close(c.Responses)
+	c.Responses <- usage
 }
 
 func (m *Monitor) handleBuild(logger lager.Logger, b atc.Build) {
