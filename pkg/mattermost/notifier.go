@@ -205,6 +205,12 @@ func (mm *Notifier) updateBotUser(user *model.User) {
 		logger.Error("fail", resp.Error)
 		return
 	}
+
+	ok, resp := mm.client.SetProfileImage(user.Id, concourseLogoPNG[:])
+	if !ok || resp.Error != nil {
+		logger.Error("set-profile-image.fail", resp.Error)
+	}
+
 	logger.Info("done")
 }
 
