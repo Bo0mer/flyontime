@@ -67,6 +67,8 @@ func (mm *Notifier) init() error {
 			mm.initErr = errors.Wrap(resp.Error, "error obtaining bot info")
 			return
 		}
+		mm.updateBotUser(self)
+
 		mm.commands = make(chan *flyontime.Command)
 		mm.posts = make(map[string]*flyontime.Notification)
 		mm.self = self
@@ -189,6 +191,21 @@ func (mm *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error
 	// TODO(borshukov): Get rid of old posts.
 	mm.posts[p.Id] = n
 	return nil
+}
+
+func (mm *Notifier) updateBotUser(user *model.User) {
+	logger := mm.Logger.Session("update-user")
+	// TODO(borshukov): This could be configurable.
+	user.Username = "Concourse"
+	user.FirstName = "Continuous"
+	user.LastName = "Integration"
+
+	_, resp := mm.client.UpdateUser(user)
+	if resp.Error != nil {
+		logger.Error("fail", resp.Error)
+		return
+	}
+	logger.Info("done")
 }
 
 func colorFor(severity flyontime.Severity) string {
