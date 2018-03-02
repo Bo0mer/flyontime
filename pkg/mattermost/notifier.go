@@ -2,7 +2,6 @@ package mattermost
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -102,7 +101,7 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 			ws.Listen()
 
 			for ev := range ws.EventChannel {
-				if ev.EventType() != "posted" {
+				if ev.EventType() != model.WEBSOCKET_EVENT_POSTED {
 					logger.Debug("skip-message")
 					continue
 				}
@@ -111,17 +110,13 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 					logger.Error("get-post-data.fail", err)
 					continue
 				}
-				p := new(model.Post)
-				if err := json.Unmarshal([]byte(postJSON), p); err != nil {
-					logger.Error("parse-post-data.fail", err)
-					continue
-				}
+				p := model.PostFromJson(strings.NewReader(postJSON))
 				if p.UserId == mm.self.Id {
 					// Do not reply to self.
 					continue
 				}
 
-				mm.handleReply(logger.Session("handle-reply"), p, p.Message)
+				mm.handlePost(logger, p)
 			}
 
 			if ws.ListenError != nil {
@@ -136,36 +131,106 @@ func (mm *Notifier) Commands() <-chan *flyontime.Command {
 	return mm.commands
 }
 
-func (mm *Notifier) handleReply(logger lager.Logger, reply *model.Post, text string) {
-	n, ok := mm.posts[reply.ParentId]
-	if !ok {
-		logger.Debug("skip-foreign-reply")
+func (mm *Notifier) handlePost(logger lager.Logger, post *model.Post) {
+	if n, ok := mm.posts[post.ParentId]; ok {
+		mm.handleReply(logger.Session("handle-reply"), post, n)
 		return
 	}
-	cmd, args := parseCommand(text)
 
+	if strings.HasPrefix(post.Message, fmt.Sprintf("@%s ", strings.ToLower(mm.self.Username))) {
+		mm.handleMention(logger.Session("handle-mention"), post)
+		return
+	}
+
+	if mm.isDirectMessage(logger, post) && post.UserId != mm.self.Id {
+		mm.handleDirectMessage(logger.Session("handle-dm"), post)
+		return
+	}
+}
+
+func (mm *Notifier) handleReply(logger lager.Logger, reply *model.Post, to *flyontime.Notification) {
+	cmd, args := parseCommand(reply.Message)
+
+	replyFunc := mm.replyToThread(reply.Id, reply.RootId)
+	mm.run(logger, &flyontime.Command{Name: cmd, Args: args, Job: &to.Job}, replyFunc)
+}
+
+func (mm *Notifier) handleMention(logger lager.Logger, post *model.Post) {
+	words := strings.Split(strings.TrimSpace(post.Message), " ")
+	if len(words) < 2 {
+		logger.Info("missing-command")
+		return
+	}
+
+	cmd, args := words[1], words[2:]
+	mm.run(logger, &flyontime.Command{Name: cmd, Args: args}, mm.replyToChannel(post.ChannelId))
+}
+
+func (mm *Notifier) handleDirectMessage(logger lager.Logger, dm *model.Post) {
+	cmd, args := parseCommand(dm.Message)
+
+	mm.run(logger, &flyontime.Command{Name: cmd, Args: args}, mm.replyToChannel(dm.ChannelId))
+}
+
+func (mm *Notifier) run(logger lager.Logger, c *flyontime.Command, reply replyFunc) {
 	go func() {
 		responses := make(chan string)
+		c.Responses = responses
+
 		// Send the command.
-		mm.commands <- &flyontime.Command{
-			Name:      cmd,
-			Args:      args,
-			Job:       &n.Job,
-			Responses: responses,
-		}
+		mm.commands <- c
+
 		// And post each response as a message.
 		for r := range responses {
-			_, resp := mm.client.CreatePost(&model.Post{
-				Message:   r,
-				ChannelId: mm.ChannelID,
-				ParentId:  reply.Id,
-				RootId:    reply.RootId,
-			})
-			if resp.Error != nil {
-				logger.Error("create-post.fail", resp.Error)
+			if err := reply(r); err != nil {
+				logger.Error("reply.fail", err)
 			}
 		}
 	}()
+}
+
+type replyFunc func(string) error
+
+func (mm *Notifier) replyToThread(parentID, rootID string) replyFunc {
+	return func(reply string) error {
+		_, resp := mm.client.CreatePost(&model.Post{
+			Message:   reply,
+			ChannelId: mm.ChannelID,
+			ParentId:  parentID,
+			RootId:    rootID,
+		})
+		// NOTE(borshukov): resp.Error has a concrete type, thus it is always
+		// non-nil interface.
+		if resp.Error == nil {
+			return nil
+		}
+		return resp.Error
+	}
+}
+
+func (mm *Notifier) replyToChannel(cid string) replyFunc {
+	return func(reply string) error {
+		_, resp := mm.client.CreatePost(&model.Post{
+			Message:   reply,
+			ChannelId: cid,
+		})
+		// NOTE(borshukov): resp.Error has a concrete type, thus it is always
+		// non-nil interface.
+		if resp.Error == nil {
+			return nil
+		}
+		return resp.Error
+	}
+}
+
+func (mm *Notifier) isDirectMessage(logger lager.Logger, post *model.Post) bool {
+	// TODO(borshukov): Cache known direct channels.
+	channel, resp := mm.client.GetChannel(post.ChannelId, "")
+	if resp.Error != nil {
+		logger.Error("get-channel-details.fail", resp.Error)
+		return false
+	}
+	return channel.Type == model.CHANNEL_DIRECT
 }
 
 func (mm *Notifier) Notify(ctx context.Context, n *flyontime.Notification) error {
