@@ -88,6 +88,13 @@ func (p *AutoPilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 	return c
 }
 
+func (p *AutoPilot) ListPipelines() ([]atc.Pipeline, error) {
+	if p.Team != nil {
+		return p.Team.ListPipelines()
+	}
+	return p.Client.ListPipelines()
+}
+
 func newConcourseClient(url, team, username, password string) (concourse.Client, error) {
 	c := concourse.NewClient(url, authenticatedClient(username, password), false)
 

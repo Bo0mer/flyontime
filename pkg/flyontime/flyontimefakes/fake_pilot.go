@@ -112,6 +112,17 @@ type FakePilot struct {
 	finishedBuildsReturnsOnCall map[int]struct {
 		result1 <-chan atc.Build
 	}
+	ListPipelinesStub        func() ([]atc.Pipeline, error)
+	listPipelinesMutex       sync.RWMutex
+	listPipelinesArgsForCall []struct{}
+	listPipelinesReturns     struct {
+		result1 []atc.Pipeline
+		result2 error
+	}
+	listPipelinesReturnsOnCall map[int]struct {
+		result1 []atc.Pipeline
+		result2 error
+	}
 	invocations      map[string][][]interface{}
 	invocationsMutex sync.RWMutex
 }
@@ -513,6 +524,49 @@ func (fake *FakePilot) FinishedBuildsReturnsOnCall(i int, result1 <-chan atc.Bui
 	}{result1}
 }
 
+func (fake *FakePilot) ListPipelines() ([]atc.Pipeline, error) {
+	fake.listPipelinesMutex.Lock()
+	ret, specificReturn := fake.listPipelinesReturnsOnCall[len(fake.listPipelinesArgsForCall)]
+	fake.listPipelinesArgsForCall = append(fake.listPipelinesArgsForCall, struct{}{})
+	fake.recordInvocation("ListPipelines", []interface{}{})
+	fake.listPipelinesMutex.Unlock()
+	if fake.ListPipelinesStub != nil {
+		return fake.ListPipelinesStub()
+	}
+	if specificReturn {
+		return ret.result1, ret.result2
+	}
+	return fake.listPipelinesReturns.result1, fake.listPipelinesReturns.result2
+}
+
+func (fake *FakePilot) ListPipelinesCallCount() int {
+	fake.listPipelinesMutex.RLock()
+	defer fake.listPipelinesMutex.RUnlock()
+	return len(fake.listPipelinesArgsForCall)
+}
+
+func (fake *FakePilot) ListPipelinesReturns(result1 []atc.Pipeline, result2 error) {
+	fake.ListPipelinesStub = nil
+	fake.listPipelinesReturns = struct {
+		result1 []atc.Pipeline
+		result2 error
+	}{result1, result2}
+}
+
+func (fake *FakePilot) ListPipelinesReturnsOnCall(i int, result1 []atc.Pipeline, result2 error) {
+	fake.ListPipelinesStub = nil
+	if fake.listPipelinesReturnsOnCall == nil {
+		fake.listPipelinesReturnsOnCall = make(map[int]struct {
+			result1 []atc.Pipeline
+			result2 error
+		})
+	}
+	fake.listPipelinesReturnsOnCall[i] = struct {
+		result1 []atc.Pipeline
+		result2 error
+	}{result1, result2}
+}
+
 func (fake *FakePilot) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
@@ -532,6 +586,8 @@ func (fake *FakePilot) Invocations() map[string][][]interface{} {
 	defer fake.buildEventsMutex.RUnlock()
 	fake.finishedBuildsMutex.RLock()
 	defer fake.finishedBuildsMutex.RUnlock()
+	fake.listPipelinesMutex.RLock()
+	defer fake.listPipelinesMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value
