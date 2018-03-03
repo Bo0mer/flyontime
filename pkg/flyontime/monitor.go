@@ -27,6 +27,8 @@ type Pilot interface {
 	CreateJobBuild(pipeline, job string) (atc.Build, error)
 	BuildEvents(job string) (concourse.Events, error)
 	FinishedBuilds(ctx context.Context) <-chan atc.Build
+
+	ListPipelines() ([]atc.Pipeline, error)
 }
 
 type Monitor struct {
@@ -94,6 +96,27 @@ func (m *Monitor) run() {
 
 func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
 	logger.Info(c.Name, lager.Data{"args": c.Args})
+
+	if c.Job != nil {
+		m.handleCommandForJob(c)
+		return
+	}
+
+	switch c.Name {
+	case "pause", "stop":
+		m.commandPausePipeline(c)
+	case "unpause", "play":
+		m.commandPlayPipeline(c)
+	case "pipelines":
+		m.commandPipelines(c)
+	case "help":
+		m.commandHelp(c)
+	default:
+		c.Responses <- fmt.Sprintf("Unknown command: %q\nTo see the list of all available commands, use `help`.", c.Name)
+	}
+}
+
+func (m *Monitor) handleCommandForJob(c *Command) {
 	switch c.Name {
 	case "rerun", "try again", "retry":
 		m.commandRerun(c)
@@ -108,8 +131,32 @@ func (m *Monitor) handleCommand(logger lager.Logger, c *Command) {
 	case "help":
 		m.commandHelp(c)
 	default:
-		c.Responses <- fmt.Sprintf("Unknown command: %q\nTo see the list of all available commands, use `help`", c.Name)
+		c.Responses <- fmt.Sprintf("Unknown command: %q\nTo see the list of all available commands, use `help`.", c.Name)
 	}
+}
+
+func (m *Monitor) commandPipelines(c *Command) {
+	defer close(c.Responses)
+
+	ps, err := m.pilot.ListPipelines()
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Listing pipelines failed: %v", err)
+		return
+	}
+
+	bstr := func(b bool) string {
+		if b {
+			return "yes"
+		}
+		return "no"
+	}
+
+	var b strings.Builder
+	for _, p := range ps {
+		fmt.Fprintf(&b, "*%s*\n\tTeam: %s\n\tPaused: %s\n\tPublic: %s\n", p.Name, p.TeamName, bstr(p.Paused), bstr(p.Public))
+	}
+
+	c.Responses <- b.String()
 }
 
 func (m *Monitor) commandRerun(c *Command) {
@@ -155,6 +202,26 @@ func (m *Monitor) commandPause(c *Command) {
 	return
 }
 
+func (m *Monitor) commandPausePipeline(c *Command) {
+	defer close(c.Responses)
+
+	if len(c.Args) != 1 {
+		c.Responses <- fmt.Sprintf("Missing pipeline name. Usage: `%s <pipeline>`.", c.Name)
+		return
+	}
+
+	pipeline := c.Args[0]
+	ok, err := m.pilot.PausePipeline(pipeline)
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Pausing pipeline %s failed: %v", pipeline, err)
+	}
+	if ok {
+		c.Responses <- fmt.Sprintf("Pipeline %s is now paused.", pipeline)
+	} else {
+		c.Responses <- fmt.Sprintf("Pipeline %s is already paused.", pipeline)
+	}
+}
+
 func (m *Monitor) commandPlay(c *Command) {
 	defer close(c.Responses)
 
@@ -179,6 +246,26 @@ func (m *Monitor) commandPlay(c *Command) {
 		c.Responses <- fmt.Sprintf("Job %s is now unpaused.", c.Job.Name)
 	} else {
 		c.Responses <- fmt.Sprintf("Job %s is already unpaused.", c.Job.Name)
+	}
+}
+
+func (m *Monitor) commandPlayPipeline(c *Command) {
+	defer close(c.Responses)
+
+	if len(c.Args) != 1 {
+		c.Responses <- fmt.Sprintf("Missing pipeline name. Usage: `%s <pipeline>`.", c.Name)
+		return
+	}
+
+	pipeline := c.Args[0]
+	ok, err := m.pilot.UnpausePipeline(pipeline)
+	if err != nil {
+		c.Responses <- fmt.Sprintf("Unpausing pipeline %s failed: %v", pipeline, err)
+	}
+	if ok {
+		c.Responses <- fmt.Sprintf("Pipeline %s is now unpaused.", pipeline)
+	} else {
+		c.Responses <- fmt.Sprintf("Pipeline %s is already unpaused.", pipeline)
 	}
 	return
 }
@@ -215,14 +302,20 @@ func (m *Monitor) commandUnmute(c *Command) {
 
 func (m *Monitor) commandHelp(c *Command) {
 	const usage = `List of supported reply commands:
-
-	rerun, retry 			Rerun the job and reply with its new status.
-	mute [duration]			Mute notifications for the job for the specified duration.
-	unmute					Turn job notifications back on.
-	pause, stop				Pause the job.
-	unpause, play			Unpause the job.
-	pause pipeline			Pause the pipeline the job is part of.
-	unpause pipeline		Unpause the pipeline the job is part of.`
+*rerun*, *retry*
+	Rerun the job and reply with its new status.
+*mute* [duration]
+	Mute notifications for the job for the specified duration.
+*unmute*
+	Turn job notifications back on.
+*pause*, *stop*
+	Pause the job.
+*unpause*, *play*
+	Unpause the job.
+*pause pipeline*
+	Pause the pipeline the job is part of.
+*unpause pipeline*
+	Unpause the pipeline the job is part of.`
 
 	defer close(c.Responses)
 	c.Responses <- usage

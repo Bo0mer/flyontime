@@ -3,7 +3,6 @@ package flyontime
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -88,26 +87,38 @@ func (p *AutoPilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 	return c
 }
 
+func (p *AutoPilot) ListPipelines() ([]atc.Pipeline, error) {
+	if p.Team != nil {
+		return p.Team.ListPipelines()
+	}
+	return p.Client.ListPipelines()
+}
+
 func newConcourseClient(url, team, username, password string) (concourse.Client, error) {
 	c := concourse.NewClient(url, authenticatedClient(username, password), false)
 
-	t := c.Team(team)
-	token, err := t.AuthToken()
-	if err != nil {
-		return nil, fmt.Errorf("failed to authenticate to team: %s", err)
-	}
-
-	oAuthToken := &oauth2.Token{
-		TokenType:   token.Type,
-		AccessToken: token.Value,
-	}
-
 	transport := &oauth2.Transport{
-		Source: oauth2.StaticTokenSource(oAuthToken),
+		Source: &teamTokenSource{c.Team(team)},
 		Base:   baseTransport(),
 	}
 
 	return concourse.NewClient(url, &http.Client{Transport: transport}, false), nil
+}
+
+type teamTokenSource struct {
+	team concourse.Team
+}
+
+func (ts *teamTokenSource) Token() (*oauth2.Token, error) {
+	token, err := ts.team.AuthToken()
+	if err != nil {
+		return nil, err
+	}
+
+	return &oauth2.Token{
+		TokenType:   token.Type,
+		AccessToken: token.Value,
+	}, nil
 }
 
 func authenticatedClient(username, password string) *http.Client {
