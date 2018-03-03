@@ -22,4 +22,5 @@ jobs:
       - checkout
 
       # specify any bash command here prefixed with `run: `
-      - run: go test -v ./...
+      - run: go install ./vendor/github.com/onsi/ginkgo/ginkgo
+      - run: ginkgo -r -p --race --randomizeAllSpecs
