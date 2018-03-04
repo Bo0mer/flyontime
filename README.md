@@ -1,4 +1,4 @@
-# flyontime
+# flyontime [![CircleCI](https://circleci.com/gh/Bo0mer/flyontime.svg?style=svg)](https://circleci.com/gh/Bo0mer/flyontime)
 
 Command flyontime implements interactive Slack/Mattermost bot that monitors
 Concourse CI jobs and sends notifications on significant events.
