@@ -301,7 +301,16 @@ func (m *Monitor) commandUnmute(c *Command) {
 }
 
 func (m *Monitor) commandHelp(c *Command) {
-	const usage = `List of supported reply commands:
+	const usage = `List of supported commands:
+*pipelines*
+	List all pipeline and their status.
+*pause <pipeline>*
+	Pause pipeline.
+*unpause <pipeline>*
+	Unpause pipeline.
+
+
+List of supported reply commands:
 *rerun*, *retry*
 	Rerun the job and reply with its new status.
 *mute* [duration]
