@@ -53,7 +53,7 @@ var _ = Describe("Monitor", func() {
 			responses = make(chan string, 1)
 			c = &Command{Responses: responses}
 
-			commands = make(chan *Command, 1)
+			commands = make(chan *Command, 2)
 			commander.CommandsReturns(commands)
 
 			builds = make(chan atc.Build, 2)
@@ -180,7 +180,7 @@ var _ = Describe("Monitor", func() {
 			})
 		})
 
-		Context("and it it unmute", func() {
+		Context("and it is unmute", func() {
 			Context("and the job was previously muted", func() {
 				var j *Job
 				BeforeEach(func() {
@@ -190,19 +190,17 @@ var _ = Describe("Monitor", func() {
 						Name:     "j1",
 					}
 
-					go func() {
-						commands <- &Command{
-							Name:      "mute",
-							Job:       j,
-							Responses: make(chan string, 1),
-						}
+					commands <- &Command{
+						Name:      "mute",
+						Job:       j,
+						Responses: make(chan string, 1),
+					}
 
-						commands <- &Command{
-							Name:      "unmute",
-							Job:       j,
-							Responses: responses,
-						}
-					}()
+					commands <- &Command{
+						Name:      "unmute",
+						Job:       j,
+						Responses: responses,
+					}
 				})
 
 				It("should say that it is unmuting notifications for the job", func() {
@@ -212,7 +210,11 @@ var _ = Describe("Monitor", func() {
 				})
 
 				Context("and the job goes into bad state", func() {
-					BeforeEach(func() {
+					It("sends a notification", func() {
+						// TODO(borshukov): This should be in a BeforeEach.
+						// Wait for processing of 'unmute'.
+						Eventually(responses).Should(Receive())
+						// And then send build.
 						builds <- atc.Build{
 							ID:           42,
 							Status:       "errored",
@@ -220,9 +222,7 @@ var _ = Describe("Monitor", func() {
 							PipelineName: "p1",
 							JobName:      "j1",
 						}
-					})
 
-					It("sends a notification", func() {
 						Eventually(notifier.NotifyCallCount).Should(Equal(1))
 						_, argNotification := notifier.NotifyArgsForCall(0)
 						Ω(argNotification.Job).Should(Equal(*j))
