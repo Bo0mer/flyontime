@@ -290,7 +290,12 @@ func formatCode(code string) string {
 	if code == "" {
 		return ""
 	}
-	return fmt.Sprintf("```text\n%s\n```", vtclean.Clean(code, false))
+
+	indent := "    "
+	clean := vtclean.Clean(code, false)
+	clean = strings.Replace(clean, "\n", "\n"+indent, -1)
+
+	return indent + clean
 }
 func parseCommand(text string) (string, []string) {
 	s := strings.Split(text, " ")
