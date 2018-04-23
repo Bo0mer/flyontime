@@ -71,6 +71,9 @@ func (p *AutoPilot) FinishedBuilds(ctx context.Context) <-chan atc.Build {
 				}
 
 				for _, b := range builds {
+					if b.TeamName != p.Team.Name() {
+						continue
+					}
 					if b.IsRunning() {
 						// In order to resend the build once it has finished.
 						lastSeen = min(b.ID, lastSeen) - 1

@@ -18,6 +18,7 @@ import (
 
 //go:generate counterfeiter . Pilot
 
+// Pilot manages resources for a specific Concoruse team.
 type Pilot interface {
 	URL() string
 	PausePipeline(pipeline string) (bool, error)
